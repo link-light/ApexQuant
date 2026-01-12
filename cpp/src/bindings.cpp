@@ -4,6 +4,7 @@
 
 #include "data_structures.h"
 #include "utils.h"
+#include "indicators.h"
 
 namespace py = pybind11;
 using namespace apexquant;
@@ -216,6 +217,101 @@ PYBIND11_MODULE(apexquant_core, m) {
           &utils::pct_change<double>,
           py::arg("data"),
           "计算百分比变化");
+    
+    // ==================== 技术指标绑定 ====================
+    
+    auto m_indicators = m.def_submodule("indicators", "技术指标模块");
+    
+    // SMA
+    m_indicators.def("sma",
+          &indicators::sma,
+          py::arg("data"), py::arg("period"),
+          "简单移动平均");
+    
+    // EMA
+    m_indicators.def("ema",
+          &indicators::ema,
+          py::arg("data"), py::arg("period"),
+          "指数移动平均");
+    
+    // MACD 结果结构
+    py::class_<indicators::MACDResult>(m_indicators, "MACDResult")
+        .def_readonly("macd", &indicators::MACDResult::macd)
+        .def_readonly("signal", &indicators::MACDResult::signal)
+        .def_readonly("histogram", &indicators::MACDResult::histogram);
+    
+    m_indicators.def("macd",
+          &indicators::macd,
+          py::arg("data"), 
+          py::arg("fast_period") = 12,
+          py::arg("slow_period") = 26,
+          py::arg("signal_period") = 9,
+          "MACD 指标");
+    
+    // RSI
+    m_indicators.def("rsi",
+          &indicators::rsi,
+          py::arg("data"), py::arg("period") = 14,
+          "相对强弱指标");
+    
+    // 布林带结果结构
+    py::class_<indicators::BollingerBandsResult>(m_indicators, "BollingerBandsResult")
+        .def_readonly("upper", &indicators::BollingerBandsResult::upper)
+        .def_readonly("middle", &indicators::BollingerBandsResult::middle)
+        .def_readonly("lower", &indicators::BollingerBandsResult::lower);
+    
+    m_indicators.def("bollinger_bands",
+          &indicators::bollinger_bands,
+          py::arg("data"), 
+          py::arg("period") = 20,
+          py::arg("num_std") = 2.0,
+          "布林带");
+    
+    // KDJ 结果结构
+    py::class_<indicators::KDJResult>(m_indicators, "KDJResult")
+        .def_readonly("k", &indicators::KDJResult::k)
+        .def_readonly("d", &indicators::KDJResult::d)
+        .def_readonly("j", &indicators::KDJResult::j);
+    
+    m_indicators.def("kdj",
+          &indicators::kdj,
+          py::arg("high"), py::arg("low"), py::arg("close"),
+          py::arg("period") = 9,
+          py::arg("k_smooth") = 3,
+          py::arg("d_smooth") = 3,
+          "KDJ 指标");
+    
+    // ATR
+    m_indicators.def("atr",
+          &indicators::atr,
+          py::arg("high"), py::arg("low"), py::arg("close"),
+          py::arg("period") = 14,
+          "平均真实波动范围");
+    
+    // OBV
+    m_indicators.def("obv",
+          &indicators::obv,
+          py::arg("close"), py::arg("volume"),
+          "能量潮");
+    
+    // Momentum
+    m_indicators.def("momentum",
+          &indicators::momentum,
+          py::arg("data"), py::arg("period") = 10,
+          "动量指标");
+    
+    // ROC
+    m_indicators.def("roc",
+          &indicators::roc,
+          py::arg("data"), py::arg("period") = 10,
+          "变动率");
+    
+    // Williams %R
+    m_indicators.def("williams_r",
+          &indicators::williams_r,
+          py::arg("high"), py::arg("low"), py::arg("close"),
+          py::arg("period") = 14,
+          "威廉指标");
     
     // 版本信息
     m.attr("__version__") = "1.0.0";
