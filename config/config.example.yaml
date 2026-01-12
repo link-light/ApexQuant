@@ -1,0 +1,145 @@
+# ApexQuant 配置文件示例
+# 复制此文件为 config.yaml 并填入你的配置
+
+# ==================== 系统配置 ====================
+system:
+  log_level: INFO  # DEBUG, INFO, WARNING, ERROR
+  log_file: logs/apexquant.log
+  data_dir: data/
+  cache_dir: data/cache/
+
+# ==================== 数据源配置 ====================
+data_sources:
+  # AKShare（主要数据源）
+  akshare:
+    enabled: true
+    timeout: 30  # 秒
+    
+  # xtquant（迅投）
+  xtquant:
+    enabled: false
+    account: ""
+    
+  # 自定义数据源
+  custom:
+    enabled: false
+    url: ""
+    api_key: ""
+
+# ==================== AI 配置 ====================
+ai:
+  # DeepSeek
+  deepseek:
+    enabled: true
+    api_key: ""  # 从环境变量 DEEPSEEK_API_KEY 读取
+    base_url: "https://api.deepseek.com"
+    model: "deepseek-chat"
+    temperature: 0.7
+    max_tokens: 4000
+    
+  # Claude（可选）
+  claude:
+    enabled: false
+    api_key: ""  # 从环境变量 ANTHROPIC_API_KEY 读取
+    model: "claude-3-5-sonnet-20241022"
+    temperature: 0.7
+    max_tokens: 4000
+
+# ==================== 回测配置 ====================
+backtest:
+  # 初始资金
+  initial_capital: 1000000.0
+  
+  # 手续费率
+  commission:
+    buy: 0.0003   # 买入手续费率（万三）
+    sell: 0.0013  # 卖出手续费率（万三 + 印花税千一）
+    min: 5.0      # 最低手续费
+  
+  # 滑点
+  slippage:
+    type: "percentage"  # fixed, percentage, volume_based
+    value: 0.001        # 千一滑点
+  
+  # 冲击成本
+  market_impact:
+    enabled: true
+    model: "linear"  # linear, sqrt
+    coefficient: 0.1
+  
+  # 风控
+  risk_management:
+    max_position_size: 0.3  # 单只股票最大仓位（30%）
+    max_drawdown: 0.2       # 最大回撤（20%触发熔断）
+    stop_loss: 0.1          # 止损（10%）
+    take_profit: 0.2        # 止盈（20%）
+
+# ==================== 实盘配置 ====================
+live_trading:
+  enabled: false
+  mode: "simulation"  # simulation, paper, live
+  
+  # 券商接口
+  broker:
+    name: "qmt"  # qmt, xtp, goldminer
+    account: ""
+    
+  # 风控
+  risk_limits:
+    max_order_value: 100000  # 单笔最大下单金额
+    daily_loss_limit: 50000  # 日内最大亏损
+    max_positions: 10        # 最大持仓数
+
+# ==================== 监控和告警 ====================
+monitoring:
+  # Prometheus
+  prometheus:
+    enabled: false
+    port: 9090
+    
+  # 告警
+  alerts:
+    # 企业微信
+    wecom:
+      enabled: false
+      webhook: ""
+      
+    # Telegram
+    telegram:
+      enabled: false
+      bot_token: ""
+      chat_id: ""
+      
+    # 邮件
+    email:
+      enabled: false
+      smtp_server: "smtp.gmail.com"
+      smtp_port: 587
+      username: ""
+      password: ""
+      to_addresses: []
+
+# ==================== 策略配置 ====================
+strategies:
+  # 示例策略
+  example_strategy:
+    enabled: false
+    symbols: ["600519.SH", "000858.SZ"]
+    params:
+      short_window: 5
+      long_window: 20
+
+# ==================== 性能配置 ====================
+performance:
+  # 多线程
+  num_threads: -1  # -1 表示使用所有 CPU 核心
+  
+  # 缓存
+  cache_enabled: true
+  cache_size_mb: 1024
+  
+  # 数据库
+  database:
+    type: "sqlite"  # sqlite, postgresql
+    path: "data/apexquant.db"
+

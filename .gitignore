@@ -1,0 +1,69 @@
+# C++ 编译产物
+build/
+cmake-build-*/
+*.o
+*.so
+*.dylib
+*.dll
+*.exe
+*.out
+*.app
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+*.egg-info/
+dist/
+*.egg
+
+# IDE 配置
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# 数据文件
+data/
+*.csv
+*.h5
+*.hdf5
+*.db
+*.sqlite
+
+# 日志文件
+logs/
+*.log
+
+# 配置文件（可能包含敏感信息）
+config/local_*.json
+config/secrets.json
+*.env
+
+# 临时文件
+tmp/
+temp/
+*.tmp
+
+# 测试覆盖率
+htmlcov/
+.coverage
+.pytest_cache/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+Makefile
+cmake_install.cmake
+install_manifest.txt
+
+# FetchContent
+_deps/
+
