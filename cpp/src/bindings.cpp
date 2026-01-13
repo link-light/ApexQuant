@@ -6,6 +6,7 @@
 #include "utils.h"
 #include "indicators.h"
 #include "backtest_engine.h"
+#include "risk_metrics.h"
 
 namespace py = pybind11;
 using namespace apexquant;
@@ -369,6 +370,75 @@ PYBIND11_MODULE(apexquant_core, m) {
         .def("get_total_value", &BacktestEngine::get_total_value)
         .def("get_position", &BacktestEngine::get_position)
         .def("has_position", &BacktestEngine::has_position);
+    
+    // ==================== 风险指标绑定 ====================
+    
+    auto m_risk = m.def_submodule("risk", "风险指标模块");
+    
+    m_risk.def("value_at_risk", &risk::value_at_risk,
+              py::arg("returns"), py::arg("confidence") = 0.95,
+              "风险价值 (VaR)");
+    
+    m_risk.def("conditional_var", &risk::conditional_var,
+              py::arg("returns"), py::arg("confidence") = 0.95,
+              "条件风险价值 (CVaR)");
+    
+    m_risk.def("calmar_ratio", &risk::calmar_ratio,
+              py::arg("annual_return"), py::arg("max_drawdown"),
+              "Calmar 比率");
+    
+    m_risk.def("sortino_ratio", &risk::sortino_ratio,
+              py::arg("returns"), 
+              py::arg("risk_free_rate") = 0.0,
+              py::arg("periods_per_year") = 252,
+              "Sortino 比率");
+    
+    m_risk.def("omega_ratio", &risk::omega_ratio,
+              py::arg("returns"), py::arg("threshold") = 0.0,
+              "Omega 比率");
+    
+    m_risk.def("max_drawdown", &risk::max_drawdown,
+              py::arg("equity_curve"),
+              "最大回撤");
+    
+    m_risk.def("drawdown_series", &risk::drawdown_series,
+              py::arg("equity_curve"),
+              "回撤序列");
+    
+    m_risk.def("max_drawdown_duration", &risk::max_drawdown_duration,
+              py::arg("equity_curve"),
+              "最大回撤持续时间");
+    
+    m_risk.def("information_ratio", &risk::information_ratio,
+              py::arg("returns"), py::arg("benchmark_returns"),
+              py::arg("periods_per_year") = 252,
+              "信息比率");
+    
+    m_risk.def("downside_std", &risk::downside_std,
+              py::arg("returns"), py::arg("threshold") = 0.0,
+              "下行标准差");
+    
+    m_risk.def("beta", &risk::beta,
+              py::arg("returns"), py::arg("market_returns"),
+              "Beta 系数");
+    
+    m_risk.def("alpha", &risk::alpha,
+              py::arg("returns"), py::arg("market_returns"),
+              py::arg("risk_free_rate") = 0.0,
+              py::arg("periods_per_year") = 252,
+              "Alpha 系数");
+    
+    m_risk.def("win_rate", &risk::win_rate,
+              py::arg("returns"),
+              "胜率");
+    
+    m_risk.def("profit_loss_ratio", &risk::profit_loss_ratio,
+              py::arg("returns"),
+              "盈亏比");
+    
+    m_risk.def("tail_ratio", &risk::tail_ratio,
+              py::arg("returns"), py::arg("percentile") = 0.95,
+              "尾部比率");
     
     // 版本信息
     m.attr("__version__") = "1.0.0";
