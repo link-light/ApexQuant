@@ -1,0 +1,56 @@
+{
+  "dashboard": {
+    "title": "ApexQuant 交易系统监控",
+    "tags": ["apexquant", "trading"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "系统概览",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "up{job='apexquant'}",
+            "legendFormat": "服务状态"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "CPU 使用率",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+        "targets": [
+          {
+            "expr": "100 - (avg(irate(node_cpu_seconds_total{mode='idle'}[5m])) * 100)",
+            "legendFormat": "CPU 使用率"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "内存使用率",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+        "targets": [
+          {
+            "expr": "(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100",
+            "legendFormat": "内存使用率"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "交易统计",
+        "type": "table",
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 12},
+        "description": "交易系统实时统计（需要暴露自定义指标）"
+      }
+    ],
+    "refresh": "30s",
+    "schemaVersion": 27,
+    "version": 1
+  }
+}
+

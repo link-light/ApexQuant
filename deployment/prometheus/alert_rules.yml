@@ -1,0 +1,65 @@
+# Prometheus 告警规则
+
+groups:
+  - name: apexquant_alerts
+    interval: 30s
+    rules:
+      # 服务宕机
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "服务 {{ $labels.job }} 已宕机"
+          description: "{{ $labels.instance }} 服务已停止响应超过 1 分钟"
+
+      # CPU 使用率过高
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CPU 使用率过高"
+          description: "{{ $labels.instance }} CPU 使用率 {{ $value }}% 超过 5 分钟"
+
+      # 内存使用率过高
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "内存使用率过高"
+          description: "{{ $labels.instance }} 内存使用率 {{ $value }}%"
+
+      # 磁盘使用率过高
+      - alert: HighDiskUsage
+        expr: (1 - (node_filesystem_avail_bytes / node_filesystem_size_bytes)) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "磁盘使用率过高"
+          description: "{{ $labels.instance }} 磁盘使用率 {{ $value }}%"
+
+      # 交易系统告警（自定义指标）
+      # - alert: HighDrawdown
+      #   expr: apexquant_max_drawdown > 0.15
+      #   for: 1m
+      #   labels:
+      #     severity: critical
+      #   annotations:
+      #     summary: "最大回撤超过 15%"
+      #     description: "当前最大回撤: {{ $value }}"
+
+      # - alert: LowWinRate
+      #   expr: apexquant_win_rate < 0.40
+      #   for: 30m
+      #   labels:
+      #     severity: warning
+      #   annotations:
+      #     summary: "胜率过低"
+      #     description: "当前胜率: {{ $value }}"
+
