@@ -5,6 +5,7 @@
 #include "data_structures.h"
 #include "utils.h"
 #include "indicators.h"
+#include "backtest_engine.h"
 
 namespace py = pybind11;
 using namespace apexquant;
@@ -312,6 +313,62 @@ PYBIND11_MODULE(apexquant_core, m) {
           py::arg("high"), py::arg("low"), py::arg("close"),
           py::arg("period") = 14,
           "威廉指标");
+    
+    // ==================== 回测引擎绑定 ====================
+    
+    // 回测配置
+    py::class_<BacktestConfig>(m, "BacktestConfig")
+        .def(py::init<>())
+        .def_readwrite("initial_capital", &BacktestConfig::initial_capital)
+        .def_readwrite("commission_rate", &BacktestConfig::commission_rate)
+        .def_readwrite("min_commission", &BacktestConfig::min_commission)
+        .def_readwrite("slippage_rate", &BacktestConfig::slippage_rate)
+        .def_readwrite("enable_market_impact", &BacktestConfig::enable_market_impact)
+        .def_readwrite("market_impact_coef", &BacktestConfig::market_impact_coef);
+    
+    // 交易记录
+    py::class_<Trade>(m, "Trade")
+        .def(py::init<>())
+        .def_readwrite("symbol", &Trade::symbol)
+        .def_readwrite("timestamp", &Trade::timestamp)
+        .def_readwrite("side", &Trade::side)
+        .def_readwrite("quantity", &Trade::quantity)
+        .def_readwrite("price", &Trade::price)
+        .def_readwrite("commission", &Trade::commission)
+        .def_readwrite("slippage", &Trade::slippage)
+        .def_readwrite("strategy_id", &Trade::strategy_id);
+    
+    // 回测结果
+    py::class_<BacktestResult>(m, "BacktestResult")
+        .def(py::init<>())
+        .def_readwrite("total_return", &BacktestResult::total_return)
+        .def_readwrite("annual_return", &BacktestResult::annual_return)
+        .def_readwrite("sharpe_ratio", &BacktestResult::sharpe_ratio)
+        .def_readwrite("max_drawdown", &BacktestResult::max_drawdown)
+        .def_readwrite("win_rate", &BacktestResult::win_rate)
+        .def_readwrite("total_trades", &BacktestResult::total_trades)
+        .def_readwrite("winning_trades", &BacktestResult::winning_trades)
+        .def_readwrite("losing_trades", &BacktestResult::losing_trades)
+        .def_readwrite("total_commission", &BacktestResult::total_commission)
+        .def_readwrite("total_slippage", &BacktestResult::total_slippage)
+        .def_readwrite("equity_curve", &BacktestResult::equity_curve)
+        .def_readwrite("daily_returns", &BacktestResult::daily_returns)
+        .def_readwrite("trades", &BacktestResult::trades);
+    
+    // 回测引擎
+    py::class_<BacktestEngine>(m, "BacktestEngine")
+        .def(py::init<const BacktestConfig&>(), py::arg("config") = BacktestConfig())
+        .def("set_data", &BacktestEngine::set_data)
+        .def("run", &BacktestEngine::run)
+        .def("buy", &BacktestEngine::buy, 
+             py::arg("symbol"), py::arg("quantity"), py::arg("limit_price") = 0.0)
+        .def("sell", &BacktestEngine::sell,
+             py::arg("symbol"), py::arg("quantity"), py::arg("limit_price") = 0.0)
+        .def("close_position", &BacktestEngine::close_position)
+        .def("get_cash", &BacktestEngine::get_cash)
+        .def("get_total_value", &BacktestEngine::get_total_value)
+        .def("get_position", &BacktestEngine::get_position)
+        .def("has_position", &BacktestEngine::has_position);
     
     // 版本信息
     m.attr("__version__") = "1.0.0";
