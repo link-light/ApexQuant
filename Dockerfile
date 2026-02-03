@@ -1,7 +1,7 @@
 # ApexQuant Dockerfile
 # 混合语言量化交易系统
 
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 
 LABEL maintainer="ApexQuant Team"
 LABEL description="AI-Driven Quantitative Trading System"
@@ -9,6 +9,10 @@ LABEL description="AI-Driven Quantitative Trading System"
 # 避免交互式提示
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Asia/Shanghai
+
+# 使用国内镜像源（阿里云）
+RUN sed -i 's@//.*archive.ubuntu.com@//mirrors.aliyun.com@g' /etc/apt/sources.list.d/ubuntu.sources && \
+    sed -i 's@//.*security.ubuntu.com@//mirrors.aliyun.com@g' /etc/apt/sources.list.d/ubuntu.sources
 
 # 安装系统依赖
 RUN apt-get update && apt-get install -y \
@@ -18,8 +22,8 @@ RUN apt-get update && apt-get install -y \
     wget \
     curl \
     vim \
-    python3.10 \
-    python3.10-dev \
+    python3.12 \
+    python3.12-dev \
     python3-pip \
     libssl-dev \
     libboost-all-dev \
@@ -27,10 +31,12 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # 设置 Python 别名
-RUN ln -s /usr/bin/python3.10 /usr/bin/python
+RUN ln -s /usr/bin/python3.12 /usr/bin/python
 
-# 升级 pip
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+# 配置 pip 使用国内源并升级
+RUN pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/ && \
+    pip config set install.trusted-host mirrors.aliyun.com && \
+    pip install --no-cache-dir --upgrade pip setuptools wheel
 
 # 创建工作目录
 WORKDIR /app

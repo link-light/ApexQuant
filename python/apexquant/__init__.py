@@ -89,3 +89,17 @@ def print_info():
     
     print("=" * 60)
 
+
+# 导入数据模块（多数据源支持）
+try:
+    from .data import get_stock_data, get_realtime_price, MultiSourceDataFetcher
+    
+    # 添加到导出列表
+    if '__all__' in globals():
+        __all__.extend(['get_stock_data', 'get_realtime_price', 'MultiSourceDataFetcher'])
+    else:
+        __all__ = ['get_stock_data', 'get_realtime_price', 'MultiSourceDataFetcher']
+    
+except ImportError:
+    pass
+
