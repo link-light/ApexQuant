@@ -93,6 +93,36 @@ public:
         const Tick& tick, 
         OrderSide side
     );
+    
+    /**
+     * @brief 验证订单数量是否合法
+     * @param volume 订单数量
+     * @param side 买卖方向
+     * @param available_volume 可卖数量（仅卖出时使用）
+     * @return {是否合法, 错误信息}
+     */
+    std::pair<bool, std::string> validate_order_volume(
+        int64_t volume,
+        OrderSide side,
+        int64_t available_volume = 0
+    );
+    
+    /**
+     * @brief 计算完整的交易费用
+     * @param side 买卖方向
+     * @param symbol 股票代码
+     * @param price 价格
+     * @param volume 数量
+     * @param commission_rate 佣金率
+     * @return 总费用（佣金+印花税+过户费）
+     */
+    double calculate_total_commission(
+        OrderSide side,
+        const std::string& symbol,
+        double price,
+        int64_t volume,
+        double commission_rate
+    );
 
 private:
     double default_slippage_rate_;     // 默认滑点率

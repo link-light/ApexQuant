@@ -93,6 +93,106 @@ class TradingCalendar:
         
         return in_morning_auction or in_close_auction
     
+    def can_cancel_order(self, dt: datetime.datetime) -> bool:
+        """
+        判断当前时间是否可以撤单
+        
+        A股规则：
+        - 9:20-9:25 开盘集合竞价期间不能撤单
+        - 14:57-15:00 收盘集合竞价期间不能撤单
+        - 其他交易时间可以撤单
+        
+        Args:
+            dt: 日期时间
+            
+        Returns:
+            True if can cancel order
+        """
+        if not self.is_trading_day(dt.date()):
+            return False
+        
+        current_time = dt.time()
+        
+        # 9:20-9:25 不能撤单
+        no_cancel_morning_start = datetime.time(9, 20)
+        no_cancel_morning_end = datetime.time(9, 25)
+        
+        if no_cancel_morning_start <= current_time <= no_cancel_morning_end:
+            return False
+        
+        # 14:57-15:00 不能撤单（深圳）
+        if self.close_auction_start <= current_time <= self.close_auction_end:
+            return False
+        
+        # 其他交易时间可以撤单
+        return self.is_trading_time(dt) or self.is_call_auction_time(dt)
+    
+    def is_continuous_auction_time(self, dt: datetime.datetime) -> bool:
+        """
+        判断是否在连续竞价时间（非集合竞价）
+        
+        Args:
+            dt: 日期时间
+            
+        Returns:
+            True if in continuous auction time
+        """
+        return self.is_trading_time(dt) and not self.is_call_auction_time(dt)
+    
+    def get_auction_phase(self, dt: datetime.datetime) -> str:
+        """
+        获取当前交易阶段
+        
+        Args:
+            dt: 日期时间
+            
+        Returns:
+            交易阶段：
+            - "BEFORE_OPEN": 开盘前
+            - "CALL_AUCTION_OPEN": 开盘集合竞价
+            - "CONTINUOUS_MORNING": 上午连续竞价
+            - "NOON_BREAK": 午休
+            - "CONTINUOUS_AFTERNOON": 下午连续竞价
+            - "CALL_AUCTION_CLOSE": 收盘集合竞价
+            - "AFTER_CLOSE": 收盘后
+            - "NON_TRADING_DAY": 非交易日
+        """
+        if not self.is_trading_day(dt.date()):
+            return "NON_TRADING_DAY"
+        
+        current_time = dt.time()
+        
+        # 开盘前
+        if current_time < self.call_auction_start:
+            return "BEFORE_OPEN"
+        
+        # 开盘集合竞价 9:15-9:25
+        if self.call_auction_start <= current_time <= self.call_auction_end:
+            return "CALL_AUCTION_OPEN"
+        
+        # 9:25-9:30 等待开盘
+        if self.call_auction_end < current_time < self.morning_start:
+            return "BEFORE_OPEN"
+        
+        # 上午连续竞价 9:30-11:30
+        if self.morning_start <= current_time <= self.morning_end:
+            return "CONTINUOUS_MORNING"
+        
+        # 午休 11:30-13:00
+        if self.morning_end < current_time < self.afternoon_start:
+            return "NOON_BREAK"
+        
+        # 下午连续竞价 13:00-14:57
+        if self.afternoon_start <= current_time < self.close_auction_start:
+            return "CONTINUOUS_AFTERNOON"
+        
+        # 收盘集合竞价 14:57-15:00
+        if self.close_auction_start <= current_time <= self.close_auction_end:
+            return "CALL_AUCTION_CLOSE"
+        
+        # 收盘后
+        return "AFTER_CLOSE"
+    
     def get_next_trading_day(self, date: datetime.date) -> datetime.date:
         """
         获取下一个交易日

@@ -20,8 +20,8 @@ try:
     exchange = sim.SimulatedExchange("demo_account", 100000.0)
     print(f"  [OK] Exchange created")
     print(f"       - Account ID: {exchange.get_account_id()}")
-    print(f"       - Available Cash: {exchange.get_available_cash():,.2f} CNY")
-    print(f"       - Total Assets: {exchange.get_total_assets():,.2f} CNY")
+    print(f"       - Available Cash: {exchange.get_available_cash():,.2f}")
+    print(f"       - Total Assets: {exchange.get_total_assets():,.2f}")
     
     # 3. Test order submission
     print("\n[3/5] Testing order submission...")

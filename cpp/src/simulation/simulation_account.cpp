@@ -15,7 +15,9 @@ SimulationAccount::SimulationAccount(const std::string& account_id, double initi
     : account_id_(account_id),
       initial_capital_(initial_capital),
       available_cash_(initial_capital),
+      withdrawable_cash_(initial_capital),
       frozen_cash_(0.0),
+      today_sell_amount_(0.0),
       realized_pnl_(0.0) {
     
     if (initial_capital <= 0) {
@@ -42,6 +44,11 @@ double SimulationAccount::get_total_assets() const {
 double SimulationAccount::get_available_cash() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return available_cash_;
+}
+
+double SimulationAccount::get_withdrawable_cash() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return withdrawable_cash_;
 }
 
 double SimulationAccount::get_frozen_cash() const {
@@ -153,8 +160,11 @@ bool SimulationAccount::reduce_position(
     realized_pnl = round_to_cent(revenue - cost);
     realized_pnl_ += realized_pnl;
     
-    // 增加可用资金
+    // 增加可用资金（今日可用于买入）
     available_cash_ += revenue;
+    
+    // 记录今日卖出金额（明日才可取）
+    today_sell_amount_ += revenue;
     
     // 减少持仓
     pos.volume -= volume;
@@ -217,6 +227,27 @@ void SimulationAccount::update_position_price(const std::string& symbol, double 
 void SimulationAccount::update_available_volume(int64_t current_date) {
     std::lock_guard<std::mutex> lock(mutex_);
     
+    for (auto& pair : positions_) {
+        Position& pos = pair.second;
+        
+        // 如果买入日期早于当前日期，全部可卖
+        if (pos.buy_date < current_date) {
+            pos.available_volume = pos.volume - pos.frozen_volume;
+        }
+    }
+}
+
+void SimulationAccount::daily_settlement(int64_t current_date) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    
+    // 1. 更新可取资金（昨日卖出的钱今日可取）
+    // 简化处理：将可用资金同步到可取资金
+    withdrawable_cash_ = available_cash_;
+    
+    // 2. 清零今日卖出金额（新的一天开始）
+    today_sell_amount_ = 0.0;
+    
+    // 3. 更新持仓可卖数量（T+1解锁）
     for (auto& pair : positions_) {
         Position& pos = pair.second;
         

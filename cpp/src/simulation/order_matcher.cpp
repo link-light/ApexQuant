@@ -30,9 +30,10 @@ MatchResult OrderMatcher::try_match_order(
     const Tick& current_tick,
     bool check_price_limit
 ) {
-    // 1. 检查基本有效性
-    if (order.volume <= 0) {
-        return MatchResult("Order volume must be positive");
+    // 1. 检查订单数量有效性（100股整数倍等）
+    auto [is_valid, error_msg] = validate_order_volume(order.volume, order.side);
+    if (!is_valid) {
+        return MatchResult(error_msg);
     }
     
     // 2. 确定基准价格
@@ -65,10 +66,12 @@ MatchResult OrderMatcher::try_match_order(
     // 3. 检查涨跌停（如果启用）
     if (check_price_limit && current_tick.last_close > 0) {
         if (!check_limit_price(order.symbol, base_price, current_tick.last_close)) {
+            // 涨跌停时不直接拒绝，而是返回特殊状态让上层处理
+            // 由上层决定是否加入排队队列
             if (order.side == OrderSide::BUY) {
-                return MatchResult("Price at limit up");
+                return MatchResult("Price at limit up - queuing");
             } else {
-                return MatchResult("Price at limit down");
+                return MatchResult("Price at limit down - queuing");
             }
         }
     }
@@ -183,6 +186,78 @@ double OrderMatcher::get_limit_pct(const std::string& symbol) {
 
 double OrderMatcher::round_to_cent(double value) {
     return std::round(value * 100.0) / 100.0;
+}
+
+std::pair<bool, std::string> OrderMatcher::validate_order_volume(
+    int64_t volume,
+    OrderSide side,
+    int64_t available_volume
+) {
+    // 1. 数量必须大于0
+    if (volume <= 0) {
+        return {false, "Order volume must be positive"};
+    }
+    
+    // 2. 单笔最大100万股
+    if (volume > 1000000) {
+        return {false, "Order volume exceeds maximum (1,000,000 shares)"};
+    }
+    
+    // 3. 买入必须是100股的整数倍（A股规则）
+    if (side == OrderSide::BUY) {
+        if (volume % 100 != 0) {
+            return {false, "Buy volume must be multiple of 100 (lot size)"};
+        }
+    }
+    
+    // 4. 卖出时检查是否超过可卖数量
+    // 注意：卖出可以不是100的整数倍（清仓最后不足一手）
+    if (side == OrderSide::SELL && available_volume > 0) {
+        if (volume > available_volume) {
+            return {false, "Sell volume exceeds available volume"};
+        }
+    }
+    
+    return {true, "OK"};
+}
+
+double OrderMatcher::calculate_total_commission(
+    OrderSide side,
+    const std::string& symbol,
+    double price,
+    int64_t volume,
+    double commission_rate
+) {
+    double amount = price * volume;
+    double total_fee = 0.0;
+    
+    // 1. 佣金（最低5元）
+    double commission = amount * commission_rate;
+    commission = std::max(commission, 5.0);
+    total_fee += commission;
+    
+    // 2. 印花税（仅卖出，千一）
+    if (side == OrderSide::SELL) {
+        double stamp_tax = amount * stamp_tax_rate_;
+        total_fee += stamp_tax;
+    }
+    
+    // 3. 过户费（仅上海A股，买卖都有）
+    // 上海A股：代码以6开头或sh.6开头
+    bool is_shanghai_stock = false;
+    if (symbol.length() >= 1 && symbol[0] == '6') {
+        is_shanghai_stock = true;
+    } else if (symbol.length() >= 4 && symbol.substr(0, 4) == "sh.6") {
+        is_shanghai_stock = true;
+    }
+    
+    if (is_shanghai_stock) {
+        // 过户费：每股0.002分 = 0.00002元
+        double transfer_fee = volume * 0.00002;
+        total_fee += transfer_fee;
+    }
+    
+    return round_to_cent(total_fee);
 }
 
 } // namespace simulation

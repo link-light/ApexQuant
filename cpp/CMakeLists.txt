@@ -97,4 +97,3 @@ endif()
 if(NOT MSVC)
     target_compile_options(apexquant_simulation PRIVATE -ffast-math)
 endif()
-

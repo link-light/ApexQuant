@@ -51,9 +51,14 @@ public:
     double get_total_assets() const;
     
     /**
-     * @brief 获取可用现金
+     * @brief 获取可用现金（可交易）
      */
     double get_available_cash() const;
+    
+    /**
+     * @brief 获取可取资金（可提现，T+1）
+     */
+    double get_withdrawable_cash() const;
     
     /**
      * @brief 获取冻结资金
@@ -130,6 +135,15 @@ public:
     void update_available_volume(int64_t current_date);
     
     /**
+     * @brief 每日结算（更新可取资金）
+     * 
+     * 功能：
+     * - 将今日卖出的资金转为可取资金（T+1）
+     * - 更新持仓可卖数量
+     */
+    void daily_settlement(int64_t current_date);
+    
+    /**
      * @brief 检查是否可卖（T+1规则）
      * @param symbol 股票代码
      * @param volume 数量
@@ -187,8 +201,10 @@ private:
     // 账户基本信息
     std::string account_id_;        // 账户ID
     double initial_capital_;        // 初始资金
-    double available_cash_;         // 可用现金
+    double available_cash_;         // 可用现金（可交易）
+    double withdrawable_cash_;      // 可取资金（可提现，T+1）
     double frozen_cash_;            // 冻结资金
+    double today_sell_amount_;      // 今日卖出金额（明日可取）
     double realized_pnl_;           // 已实现盈亏
     
     // 持仓信息
