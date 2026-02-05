@@ -1,366 +1,260 @@
-# ApexQuant 模拟盘系统使用指南
+# ApexQuant 模拟盘系统
 
-## 🎯 简介
+## 项目概述
 
-ApexQuant模拟盘系统是一个高性能的量化交易模拟平台，采用**C++核心引擎 + Python业务层**的混合架构。
+ApexQuant是一个高性能量化交易模拟平台，采用C++/Python混合架构，专为A股市场设计。
 
 ### 核心特性
 
-- ✅ **高性能C++引擎**：订单撮合、账户管理、持仓计算
-- ✅ **完整的A股规则**：T+1、涨跌停、集合竞价、交易时间
-- ✅ **多数据源支持**：Baostock（主）+ AKShare（备）自动切换
-- ✅ **智能风控系统**：仓位控制、止损止盈、日亏损熔断
-- ✅ **AI交易顾问**：DeepSeek API集成，智能决策辅助
-- ✅ **双运行模式**：历史回测（快速）+ 实时跟盘（真实时间）
-- ✅ **内置策略库**：均线交叉、RSI、买入持有、AI驱动
-- ✅ **完整绩效分析**：夏普比率、最大回撤、胜率等20+指标
+- **C++高性能引擎** - 订单撮合、账户管理、T+1规则
+- **Python灵活业务层** - 数据源、策略、风控、AI增强
+- **多数据源支持** - Baostock + AKShare双备份
+- **A股规则完整实现** - T+1、涨跌停、手续费/印花税
+- **AI交易顾问** - DeepSeek API集成
+- **完整风控系统** - 仓位控制、止损止盈、日亏损限制
+- **绩效分析** - 夏普比率、最大回撤、胜率等
 
-## 📦 安装
+## 快速开始
 
-### 1. 安装Python依赖
-
-```bash
-cd python
-pip install -r requirements.txt
-```
-
-主要依赖：
-- `baostock`: 主数据源
-- `akshare`: 备份数据源
-- `openai`: DeepSeek API客户端
-- `pandas`, `numpy`: 数据处理
-- `pyyaml`: 配置文件
-- `chinesecalendar`: 交易日历
-
-### 2. 编译C++模块
-
-**Windows**:
-```bash
-build.bat
-```
-
-**Linux**:
-```bash
-./build.sh
-```
-
-编译成功后会在 `python/apexquant/` 目录生成 `apexquant_simulation.pyd`（Windows）或 `.so`（Linux）文件。
-
-### 3. 配置API Key（可选，启用AI时需要）
+### 1. 编译C++模块
 
 ```bash
 # Windows
-set DEEPSEEK_API_KEY=your_api_key_here
+build.bat
 
-# Linux
-export DEEPSEEK_API_KEY=your_api_key_here
+# Linux/Mac
+./build.sh
 ```
 
-## 🚀 快速开始
+**编译结果**:
+- `apexquant_core.cp39-win_amd64.pyd` (353 KB)
+- `apexquant_simulation.cp39-win_amd64.pyd` (275 KB)
 
-### 1. 回测模式（历史数据快速回放）
+### 2. 安装依赖
 
 ```bash
-cd python
-
-# 使用均线交叉策略回测
-python examples/run_simulation.py \
-  --mode backtest \
-  --symbol 600519.SH \
-  --start-date 2024-01-01 \
-  --end-date 2024-12-31 \
-  --strategy ma_cross
-
-# 使用AI辅助策略
-python examples/run_simulation.py \
-  --mode backtest \
-  --symbol 600519.SH \
-  --start-date 2024-01-01 \
-  --end-date 2024-12-31 \
-  --strategy ma_cross \
-  --use-ai
+pip install -r python/requirements.txt
 ```
 
-### 2. 实时模式（纸上交易）
+### 3. 配置系统
 
-```bash
-# 实时跟踪市场行情（不下真实订单）
-python examples/run_simulation.py \
-  --mode realtime \
-  --symbol 600519.SH \
-  --start-date 2025-02-06 \
-  --strategy ma_cross
-```
-
-## 📊 使用示例
-
-### Python代码调用
-
-```python
-from apexquant.simulation import (
-    SimulationController,
-    SimulationMode,
-    RiskManager,
-    get_strategy
-)
-
-# 1. 创建控制器
-controller = SimulationController(
-    mode=SimulationMode.BACKTEST,
-    initial_capital=1000000
-)
-
-# 2. 初始化风控
-risk_manager = RiskManager()
-
-# 3. 选择策略
-strategy = get_strategy('ma_cross', risk_manager=risk_manager)
-
-# 4. 启动回测
-controller.start('2024-01-01', '2024-12-31', ['600519.SH'])
-
-# 5. 运行策略
-controller.run(strategy, ['600519.SH'])
-
-# 6. 生成报告
-from apexquant.simulation import PerformanceAnalyzer
-report = PerformanceAnalyzer.generate_report(
-    controller.account_id,
-    controller.config.database_path
-)
-print(report)
-```
-
-## 🎓 内置策略
-
-### 1. 均线交叉策略（ma_cross）
-
-```bash
-python examples/run_simulation.py --strategy ma_cross
-```
-
-- MA5上穿MA20 → 买入
-- MA5下穿MA20 → 卖出
-- 支持AI辅助确认（--use-ai）
-
-### 2. RSI策略（rsi）
-
-```bash
-python examples/run_simulation.py --strategy rsi
-```
-
-- RSI < 30 → 超卖，买入
-- RSI > 70 → 超买，卖出
-
-### 3. 买入持有（buy_hold）
-
-```bash
-python examples/run_simulation.py --strategy buy_hold
-```
-
-- 第一根K线用80%资金买入
-- 一直持有（测试用）
-
-### 4. AI驱动策略（ai_driven）
-
-```bash
-python examples/run_simulation.py --strategy ai_driven --use-ai
-```
-
-- 完全由AI决策
-- 每5分钟调用一次
-- 置信度>0.7才执行
-
-## ⚙️ 配置文件
-
-配置文件：`config/simulation_config.yaml`
+编辑 `config/simulation_config.yaml`:
 
 ```yaml
-simulation:
-  initial_capital: 1000000
-  database_path: data/sim_trader.db
+account:
+  initial_capital: 100000.0    # 初始资金10万
 
-trading:
-  commission_rate: 0.00025  # 万2.5
-  stamp_tax_rate: 0.001     # 千一（卖出）
-  slippage_rate: 0.0001     # 万一
-
-risk:
-  max_single_position_pct: 0.20  # 单品种20%
-  max_total_position_pct: 0.80   # 总仓位80%
-  max_daily_loss_pct: 0.05       # 日亏损5%熔断
-  stop_loss_pct: 0.10            # 止损10%
-  take_profit_pct: 0.20          # 止盈20%
-
-ai:
-  enabled: false
-  model: deepseek-chat
-  call_interval_minutes: 5
-  daily_call_limit: 100
-  confidence_threshold: 0.7
-
-data_source:
-  provider: baostock  # 主数据源
-  backup_provider: akshare  # 备份
-  frequency: 1min
+ai_advisor:
+  api_key: "your-deepseek-api-key"  # 填写你的API密钥
 ```
 
-## 📈 绩效报告
-
-运行结束后会生成详细报告：
-
-```
-============================================================
-ApexQuant Performance Report
-============================================================
-Account ID: SIM1234567890123
-Strategy: ma_cross
-Trading Days: 245.0
-
-=== Return Metrics ===
-Initial Capital: 1,000,000.00
-Final Assets: 1,150,000.00
-Total Return: 15.00%
-Annual Return: 22.35%
-
-=== Risk Metrics ===
-Max Drawdown: 8.50%
-Sharpe Ratio: 1.85
-Calmar Ratio: 2.63
-
-=== Trading Statistics ===
-Total Trades: 156
-Win Rate: 58.50%
-Avg Profit/Trade: 961.54
-Profit Factor: 1.85
-Max Consecutive Wins: 8
-Max Consecutive Losses: 5
-============================================================
-```
-
-## 🧪 测试
-
-### 运行单元测试
+### 4. 运行演示
 
 ```bash
-cd python
-python tests/test_simulation.py
+cd python/apexquant
+python quick_demo.py
 ```
 
-### 运行集成测试
+## 使用方式
+
+### 方式1: 命令行工具
 
 ```bash
-cd python
-python tests/test_integration.py
+# 回测
+python run_simulation.py backtest --start 2023-01-01 --end 2023-12-31 --symbols sh.600000
+
+# 实时模拟
+python run_simulation.py realtime --symbols sh.600000 --interval 60
+
+# 查看账户
+python run_simulation.py account
+
+# 绩效报告
+python run_simulation.py performance
 ```
 
-## 📁 项目结构
+### 方式2: Python脚本
+
+查看示例: `examples/example_simple_backtest.py`
+
+```python
+from simulation import SimulationController
+
+controller = SimulationController()
+
+def my_strategy(controller, date, daily_data):
+    # 你的策略逻辑
+    pass
+
+controller.start_backtest(
+    start_date="2023-01-01",
+    end_date="2023-12-31",
+    symbols=["sh.600000"],
+    strategy_func=my_strategy
+)
+```
+
+## 系统架构
+
+```
+ApexQuant Simulation System
+├── C++ Core (High Performance)
+│   ├── SimulatedExchange      # 模拟交易所
+│   ├── OrderMatcher            # 订单撮合引擎
+│   ├── SimulationAccount       # 账户管理
+│   └── T+1/Commission/Tax      # A股规则
+│
+├── Python Business Layer
+│   ├── SimulationController    # 核心控制器
+│   ├── DataSource              # 多数据源（Baostock+AKShare）
+│   ├── RiskManager             # 风控管理
+│   ├── PerformanceAnalyzer     # 绩效分析
+│   ├── AITradingAdvisor        # AI顾问（DeepSeek）
+│   ├── TradingCalendar         # 交易日历
+│   └── DatabaseManager         # SQLite数据库
+│
+└── CLI & Examples
+    ├── run_simulation.py       # 命令行工具
+    ├── quick_demo.py           # 快速演示
+    └── examples/               # 示例脚本
+```
+
+## 内置策略
+
+1. **ma_cross** - 均线交叉策略
+2. **rsi** - RSI超买超卖策略
+3. **buy_hold** - 买入持有策略
+4. **ai_driven** - AI驱动策略（需API密钥）
+
+## A股特殊规则
+
+系统完整实现A股规则：
+
+- **T+1** - 当日买入次日可卖
+- **涨跌停** - 主板±10%，ST±5%，科创板±20%
+- **交易时间** - 09:30-11:30, 13:00-15:00
+- **手续费** - 万2.5双向
+- **印花税** - 千一卖出
+
+## 数据源说明
+
+### Baostock（主）
+- 不受代理影响
+- 稳定可靠
+- 历史数据完整
+
+### AKShare（备）
+- 数据丰富
+- 实时行情
+- 作为备用
+
+系统自动切换，无需手动干预。
+
+## 风控系统
+
+- 单股最大仓位30%
+- 总仓位最大95%
+- 单笔最大下单5万元
+- 日亏损限制5%
+- 止损10%，止盈20%
+
+## 绩效指标
+
+- 总收益率 / 年化收益率
+- 最大回撤
+- 夏普比率 / 卡玛比率
+- 胜率 / 盈亏比
+- 交易统计
+
+## 目录结构
 
 ```
 ApexQuant/
-├── cpp/
-│   ├── include/simulation/     # C++头文件
-│   │   ├── simulation_types.h       # 数据结构
-│   │   ├── simulation_account.h     # 账户管理
-│   │   ├── order_matcher.h          # 订单撮合
-│   │   └── simulated_exchange.h     # 模拟交易所
-│   └── src/simulation/          # C++源文件
-│       ├── simulation_account.cpp
-│       ├── order_matcher.cpp
-│       ├── simulated_exchange.cpp
-│       └── bindings.cpp             # Python绑定
-├── python/apexquant/simulation/
-│   ├── database.py              # 数据库管理
-│   ├── simulation_controller.py # 核心控制器
-│   ├── config.py                # 配置管理
-│   ├── trading_calendar.py      # 交易日历
-│   ├── data_source.py           # 数据源适配
-│   ├── risk_manager.py          # 风控管理
-│   ├── performance_analyzer.py  # 绩效分析
-│   ├── ai_advisor.py            # AI顾问
-│   └── strategies.py            # 策略库
+├── cpp/                           # C++核心引擎
+│   ├── include/simulation/        # 模拟盘头文件
+│   └── src/simulation/            # 模拟盘源文件
+├── python/apexquant/
+│   ├── simulation/                # 模拟盘Python模块
+│   │   ├── config.py              # 配置管理
+│   │   ├── database.py            # 数据库
+│   │   ├── trading_calendar.py   # 交易日历
+│   │   ├── data_source.py         # 数据源适配器
+│   │   ├── risk_manager.py        # 风控
+│   │   ├── performance_analyzer.py # 绩效分析
+│   │   ├── simulation_controller.py # 核心控制器
+│   │   ├── ai_advisor.py          # AI顾问
+│   │   ├── strategies.py          # 内置策略
+│   │   └── cli.py                 # 命令行工具
+│   └── data/                      # 数据模块
+│       └── multi_source.py        # 多数据源
 ├── config/
-│   └── simulation_config.yaml   # 配置文件
-└── examples/
-    └── run_simulation.py        # CLI运行脚本
+│   └── simulation_config.yaml     # 配置文件
+├── examples/                      # 示例脚本
+├── data/                          # SQLite数据库
+├── logs/                          # 日志文件
+└── reports/                       # 绩效报告
 ```
 
-## 🔧 高级用法
+## 常见问题
 
-### 自定义策略
+### Q1: 如何运行演示？
 
-```python
-def my_custom_strategy(controller, bar, account_info):
-    """自定义策略函数"""
-    symbol = bar['symbol']
-    close = bar['close']
-    
-    # 你的策略逻辑
-    if close > some_threshold:
-        return {
-            'action': 'BUY',
-            'symbol': symbol,
-            'volume': 1000,
-            'price': None  # 市价单
-        }
-    
-    return None  # HOLD
-
-# 使用自定义策略
-controller.run(my_custom_strategy, ['600519.SH'])
+```bash
+cd python/apexquant
+python quick_demo.py
 ```
 
-### 多股票组合
+### Q2: 如何开始回测？
 
-```python
-symbols = ['600519.SH', '000001.SZ', '600036.SH']
-controller.start('2024-01-01', '2024-12-31', symbols)
-controller.run(strategy, symbols)
+```bash
+python run_simulation.py backtest \
+  --start 2023-01-01 \
+  --end 2023-12-31 \
+  --symbols sh.600000 \
+  --strategy ma_cross
 ```
 
-## ❓ 常见问题
+### Q3: 如何配置API密钥？
 
-**Q: 编译失败怎么办？**
+编辑 `config/simulation_config.yaml`：
 
-A: 确保安装了：
-- Windows: Visual Studio 2019+（C++工具）
-- Linux: gcc/g++ 7+
-- CMake 3.15+
-- pybind11
+```yaml
+ai_advisor:
+  api_key: "sk-your-deepseek-api-key-here"
+```
 
-**Q: 数据获取失败？**
+### Q4: 模块导入失败怎么办？
 
-A: 系统自动使用Baostock（主）+ AKShare（备）双数据源，正常情况至少一个可用。如果都失败，可以使用Mock数据源测试。
+必须从 `python/apexquant` 目录运行脚本：
 
-**Q: AI API调用失败？**
+```bash
+cd python/apexquant
+python your_script.py
+```
 
-A: 检查：
-1. DEEPSEEK_API_KEY环境变量是否设置
-2. 网络连接是否正常
-3. API余额是否充足
+## 下一步
 
-**Q: 如何查看历史账户？**
+1. 配置API密钥（如需AI功能）
+2. 运行快速演示验证系统
+3. 尝试运行回测示例
+4. 开发自定义策略
+5. 开始实时模拟交易
 
-A: 数据保存在SQLite数据库中（默认`data/sim_trader.db`），可以使用任何SQLite工具查看。
+## 技术栈
 
-## 📞 技术支持
+- **C++17** - 核心引擎
+- **Python 3.9+** - 业务逻辑
+- **pybind11** - C++/Python绑定
+- **SQLite** - 数据存储
+- **Baostock/AKShare** - 数据源
+- **DeepSeek API** - AI增强
+- **CMake** - 编译系统
 
-遇到问题？
-1. 查看日志：`logs/simulation.log`
-2. 运行测试：`python tests/test_simulation.py`
-3. 查看数据库：打开 `data/sim_trader.db`
+## 许可证
 
-## 🎉 完成状态
+MIT License
 
-✅ **所有20个核心任务已完成（100%）**
+## 联系方式
 
-- Phase 1: C++核心引擎（7/7）
-- Phase 2: Python业务层（6/6）
-- Phase 3: AI增强（1/1）
-- Phase 4: CLI工具（2/2）
-- Phase 5: 测试（3/3）
-- Phase 0: 基础设施（1/1）
-
----
-
-**Happy Trading! 🚀**
+- GitHub: https://github.com/link-light/ApexQuant
+- 问题反馈: GitHub Issues
