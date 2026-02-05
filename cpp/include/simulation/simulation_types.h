@@ -96,6 +96,8 @@ struct SimulatedOrder {
     int64_t filled_volume;          // 已成交数量
     OrderStatus status;             // 订单状态
     int64_t submit_time;            // 提交时间（Unix毫秒时间戳）
+    int64_t cancel_time;            // 撤销时间（0表示未撤销）
+    int64_t filled_time;            // 成交时间（0表示未成交）
     double commission_rate;         // 手续费率
     double slippage_rate;           // 滑点率
     
@@ -110,6 +112,8 @@ struct SimulatedOrder {
           filled_volume(0),
           status(OrderStatus::PENDING),
           submit_time(0),
+          cancel_time(0),
+          filled_time(0),
           commission_rate(0.00025),   // 默认万2.5
           slippage_rate(0.0001) {}    // 默认万一
     
@@ -131,6 +135,8 @@ struct SimulatedOrder {
         filled_volume(0),
         status(OrderStatus::PENDING),
         submit_time(st),
+        cancel_time(0),
+        filled_time(0),
         commission_rate(0.00025),
         slippage_rate(0.0001) {}
     

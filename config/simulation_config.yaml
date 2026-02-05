@@ -1,60 +1,67 @@
-# ============================================================================
-# ApexQuant 模拟盘配置文件
-# ============================================================================
+# ApexQuant Simulation Configuration
+# 模拟盘配置文件
 
-simulation:
-  mode: backtest  # backtest / realtime
-  initial_capital: 1000000  # 初始资金
-  database_path: data/sim_trader.db  # 数据库路径
+# 账户配置
+account:
+  account_id: simulation_001
+  initial_capital: 100000.0      # 初始资金10万
+  commission_rate: 0.00025        # 手续费万2.5
+  stamp_tax_rate: 0.001           # 印花税千一（仅卖出）
+  slippage_rate: 0.0001           # 滑点率万一
 
-trading:
-  commission_rate: 0.00025  # 手续费率（万2.5）
-  stamp_tax_rate: 0.001  # 印花税率（千一，仅卖出）
-  slippage_rate: 0.0001  # 滑点率（万一）
-  min_order_volume: 100  # 最小委托数量（100股）
-
-risk:
-  max_single_position_pct: 0.20  # 单品种最大仓位（20%）
-  max_total_position_pct: 0.80  # 总仓位上限（80%）
-  max_single_order_pct: 0.05  # 单笔最大金额占比（5%）
-  max_daily_loss_pct: 0.05  # 日亏损熔断（5%）
-  stop_loss_pct: 0.10  # 止损线（10%）
-  take_profit_pct: 0.20  # 止盈线（20%）
-  max_daily_trades: 100  # 单日最大交易次数
-  min_hold_seconds: 60  # 最小持仓时间（秒）
-
-ai:
-  enabled: false  # 是否启用AI
-  api_key_env: DEEPSEEK_API_KEY  # API Key环境变量名
-  model: deepseek-chat  # 模型名称
-  base_url: https://api.deepseek.com  # API地址
-  call_interval_minutes: 5  # AI调用间隔（分钟）
-  daily_call_limit: 100  # 每日调用上限
-  confidence_threshold: 0.7  # 置信度阈值
-  timeout: 10  # 超时时间（秒）
-
+# 数据源配置
 data_source:
-  provider: baostock  # 主数据源：baostock / akshare / mock
-  backup_provider: akshare  # 备份数据源
-  frequency: 1min  # 数据频率：1min / 5min / 15min / 1d
-  cache_enabled: true  # 是否启用缓存
-  cache_dir: data/cache  # 缓存目录
-  retry_times: 3  # 重试次数
-  retry_interval: 1  # 重试间隔（秒）
+  primary: baostock                # 主数据源
+  backup: akshare                  # 备用数据源
+  proxy: null                      # 代理设置（null表示不使用）
 
+# 交易时间配置
+trading_hours:
+  morning_start: "09:30"
+  morning_end: "11:30"
+  afternoon_start: "13:00"
+  afternoon_end: "15:00"
+
+# 风控配置
+risk_control:
+  max_single_position_pct: 0.3          # 单只股票最大仓位30%
+  max_total_position_pct: 0.95          # 总仓位最大95%
+  max_single_order_amount: 50000.0      # 单笔最大下单金额5万
+  daily_loss_limit_pct: 0.05            # 日亏损限制5%
+  stop_loss_pct: 0.1                    # 止损比例10%
+  take_profit_pct: 0.2                  # 止盈比例20%
+  enable_risk_control: true             # 是否启用风控
+
+# AI顾问配置
+ai_advisor:
+  enabled: true                         # 是否启用AI顾问
+  model: deepseek-chat                  # 模型名称
+  api_key: ""                           # API密钥（需要用户填写）
+  base_url: "https://api.deepseek.com"
+  max_calls_per_day: 100                # 每日最大调用次数
+  temperature: 0.7                      # 温度参数
+  max_tokens: 2000                      # 最大token数
+
+# 回测配置
+backtest:
+  start_date: "2023-01-01"
+  end_date: "2024-12-31"
+  bar_interval: 1m                      # K线周期：1m, 5m, 15m, 30m, 1h, 1d
+
+# 实时模拟配置
+realtime:
+  update_interval: 60                   # 数据更新间隔（秒）
+  auto_trade: false                     # 是否自动交易
+
+# 数据库配置
+database:
+  path: data/simulation.db              # SQLite数据库路径
+  auto_backup: true                     # 是否自动备份
+  backup_interval: 3600                 # 备份间隔（秒）
+
+# 日志配置
 logging:
-  level: INFO  # 日志级别：DEBUG / INFO / WARNING / ERROR
-  file: logs/simulation.log  # 日志文件路径
-  console: true  # 是否输出到控制台
-  format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-  max_bytes: 10485760  # 单个日志文件最大大小（10MB）
-  backup_count: 5  # 保留的日志文件数量
-
-strategy:
-  name: ma_cross  # 策略名称
-  parameters:  # 策略参数
-    ma_short: 5  # 短期均线
-    ma_long: 20  # 长期均线
-    rsi_period: 14  # RSI周期
-    buy_threshold: 30  # 超卖阈值
-    sell_threshold: 70  # 超买阈值
+  level: INFO                           # 日志级别
+  file: logs/simulation.log             # 日志文件
+  max_size: 10MB                        # 单个日志文件最大大小
+  backup_count: 5                       # 保留日志文件数

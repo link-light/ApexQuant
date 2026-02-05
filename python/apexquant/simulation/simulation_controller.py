@@ -1,389 +1,630 @@
 """
-ApexQuant 模拟盘控制器
-
-整合C++引擎、数据源、数据库，提供双模式运行（回测/实时）
+ApexQuant Simulation Controller
+模拟盘控制器 - 核心协调模块
 """
 
+import sys
+from pathlib import Path
+import datetime
 import logging
-import time
-from enum import Enum
-from typing import Callable, List, Dict, Optional
-from datetime import datetime
+from typing import Optional, List, Dict, Callable
+import pandas as pd
 
-# 导入各模块
+# 导入C++模块
+try:
+    import apexquant_simulation as sim_cpp
+    import apexquant_core as core_cpp
+except ImportError as e:
+    logging.error(f"Failed to import C++ modules: {e}")
+    sys.exit(1)
+
+# 导入Python模块
 from .database import DatabaseManager
-from .data_source import DataSource, create_data_source, bar_to_tick
+from .config import SimulationConfig, get_config
 from .trading_calendar import TradingCalendar, get_calendar
-from .config import get_config
+from .data_source import SimulationDataSource
+from .risk_manager import RiskManager
+from .performance_analyzer import PerformanceAnalyzer
 
 logger = logging.getLogger(__name__)
 
-# 尝试导入C++模拟盘模块
-try:
-    import apexquant_simulation as sim
-    SIMULATION_MODULE_AVAILABLE = True
-except ImportError:
-    SIMULATION_MODULE_AVAILABLE = False
-    logger.error("apexquant_simulation module not compiled, please run build.bat first")
 
-
-class SimulationMode(Enum):
+class SimulationMode:
     """模拟模式"""
-    BACKTEST = "backtest"  # 历史回放（快速）
-    REALTIME = "realtime"  # 实时跟盘（真实时间）
+    BACKTEST = "backtest"     # 回测模式
+    REALTIME = "realtime"     # 实时模拟模式
 
 
 class SimulationController:
     """模拟盘控制器"""
     
-    def __init__(
-        self,
-        mode: SimulationMode,
-        account_id: str = None,
-        initial_capital: float = None,
-        db_path: str = None,
-        config_path: str = None
-    ):
+    def __init__(self, config: Optional[SimulationConfig] = None):
         """
         初始化控制器
         
         Args:
-            mode: 运行模式
-            account_id: 账户ID（None则自动生成）
-            initial_capital: 初始资金（None则从配置读取）
-            db_path: 数据库路径（None则从配置读取）
-            config_path: 配置文件路径
+            config: 配置对象，默认使用全局配置
         """
-        # 加载配置
-        self.config = get_config(config_path)
-        
-        # 模式
-        self.mode = mode
-        
-        # 初始化参数
-        if initial_capital is None:
-            initial_capital = self.config.initial_capital
-        if db_path is None:
-            db_path = self.config.database_path
-        
-        # 初始化数据库
-        self.db = DatabaseManager(db_path)
-        
-        # 创建账户
-        if account_id is None:
-            strategy_type = self.config.get('strategy.name', 'unknown')
-            self.account_id = self.db.create_account(
-                initial_capital=initial_capital,
-                strategy_type=strategy_type
-            )
-        else:
-            self.account_id = account_id
-        
-        logger.info(f"Account ID: {self.account_id}")
-        
-        # 初始化C++模拟交易所
-        if not SIMULATION_MODULE_AVAILABLE:
-            raise RuntimeError("C++ simulation module not available")
-        
-        self.exchange = sim.SimulatedExchange(self.account_id, initial_capital)
-        
-        # 数据源和日历
-        self.data_source: Optional[DataSource] = None
+        self.config = config or get_config()
         self.calendar = get_calendar()
         
+        # 获取配置
+        account_config = self.config.get_account_config()
+        risk_config = self.config.get_risk_config()
+        data_config = self.config.get_data_source_config()
+        
+        # 初始化账户ID和初始资金
+        self.account_id = account_config.get("account_id", "simulation_001")
+        self.initial_capital = account_config.get("initial_capital", 100000.0)
+        
+        # 初始化C++模拟交易所
+        self.exchange = sim_cpp.SimulatedExchange(
+            self.account_id,
+            self.initial_capital
+        )
+        
+        # 配置手续费率等参数
+        commission_rate = account_config.get("commission_rate", 0.00025)
+        stamp_tax_rate = account_config.get("stamp_tax_rate", 0.001)
+        slippage_rate = account_config.get("slippage_rate", 0.0001)
+        
+        # TODO: 设置费率到exchange（需要C++接口支持）
+        # self.exchange.set_commission_rate(commission_rate)
+        
+        # 初始化其他组件
+        self.database = DatabaseManager(self.config.get("database.path", "data/simulation.db"))
+        self.data_source = SimulationDataSource(
+            primary_source=data_config.get("primary", "baostock"),
+            backup_source=data_config.get("backup", "akshare")
+        )
+        self.risk_manager = RiskManager(risk_config)
+        self.performance_analyzer = PerformanceAnalyzer(self.initial_capital)
+        
         # 运行状态
+        self.mode: Optional[str] = None
         self.is_running = False
-        self.current_time: Optional[datetime] = None
-        self.bar_count = 0
-        self.last_save_time: Optional[datetime] = None
+        self.current_date: Optional[datetime.date] = None
         
-        logger.info(f"SimulationController initialized in {mode.value} mode")
+        # 回调函数
+        self.on_order_callback: Optional[Callable] = None
+        self.on_trade_callback: Optional[Callable] = None
+        self.on_tick_callback: Optional[Callable] = None
+        
+        logger.info(f"Simulation controller initialized: account={self.account_id}, capital={self.initial_capital}")
     
-    def start(self, start_date: str, end_date: str = None, symbols: List[str] = None):
+    def start_backtest(
+        self,
+        start_date: str,
+        end_date: str,
+        symbols: List[str],
+        strategy_func: Callable,
+        bar_interval: str = "1d"
+    ) -> None:
         """
-        启动模拟盘
+        启动回测
         
         Args:
-            start_date: 开始日期 (YYYY-MM-DD)
-            end_date: 结束日期（BACKTEST模式必填）
+            start_date: 开始日期 'YYYY-MM-DD'
+            end_date: 结束日期 'YYYY-MM-DD'
             symbols: 股票代码列表
+            strategy_func: 策略函数，签名: strategy_func(controller, date, data)
+            bar_interval: K线周期 '1m', '5m', '1d' etc.
         """
-        # 初始化数据源
-        provider = self.config.data_provider
-        self.data_source = create_data_source(provider)
+        logger.info(f"Starting backtest: {start_date} to {end_date}, symbols={symbols}")
         
-        logger.info(f"Simulation started: {start_date} to {end_date}")
-        logger.info(f"Symbols: {symbols}")
-        
+        self.mode = SimulationMode.BACKTEST
         self.is_running = True
-    
-    def run(self, strategy_func: Callable, symbols: List[str]):
-        """
-        运行策略主循环
-        
-        Args:
-            strategy_func: 策略函数，签名：func(controller, bar, account_info) -> signals
-            symbols: 股票代码列表
-        """
-        if not self.is_running:
-            raise RuntimeError("Please call start() first")
-        
-        if self.mode == SimulationMode.BACKTEST:
-            self._run_backtest(strategy_func, symbols)
-        else:
-            self._run_realtime(strategy_func, symbols)
-    
-    def _run_backtest(self, strategy_func: Callable, symbols: List[str]):
-        """回测模式运行"""
-        logger.info("Running in BACKTEST mode...")
-        
-        # 获取历史数据（这里简化为单个symbol）
-        symbol = symbols[0]
-        start_date = self.config.get('simulation.start_date', '2024-01-01')
-        end_date = self.config.get('simulation.end_date', '2024-12-31')
-        
-        bars = self.data_source.get_history(symbol, start_date, end_date)
-        
-        if not bars:
-            logger.error(f"No data for {symbol}")
-            return
-        
-        logger.info(f"Loaded {len(bars)} bars")
-        
-        # 快速回放
-        last_close = 0.0
-        
-        for i, bar in enumerate(bars):
-            self.bar_count = i + 1
-            
-            # 转换为Tick并发送给交易所
-            tick = bar_to_tick(bar, last_close)
-            self.exchange.on_tick(tick)
-            
-            # 获取账户信息
-            account_info = self.get_account_info()
-            
-            # 调用策略
-            try:
-                signals = strategy_func(self, bar, account_info)
-                if signals:
-                    self.process_signals(signals)
-            except Exception as e:
-                logger.error(f"Strategy error: {e}")
-            
-            # 每100根K线保存一次快照
-            if i % 100 == 0:
-                self.save_snapshot()
-                logger.info(f"Progress: {i}/{len(bars)} bars, Total assets: {account_info['total_assets']:.2f}")
-            
-            last_close = bar['close']
-        
-        # 最终保存
-        self.save_snapshot()
-        logger.info(f"Backtest completed! Total bars: {len(bars)}")
-        self._print_summary()
-    
-    def _run_realtime(self, strategy_func: Callable, symbols: List[str]):
-        """实时模式运行"""
-        logger.info("Running in REALTIME mode...")
-        logger.info("Press Ctrl+C to stop")
-        
-        symbol = symbols[0]
         
         try:
-            while self.is_running:
-                # 检查交易时间
-                if not self.calendar.is_trading_time():
-                    logger.info("Market closed, waiting...")
-                    time.sleep(60)
-                    continue
+            # 获取交易日列表
+            start_dt = datetime.datetime.strptime(start_date, "%Y-%m-%d").date()
+            end_dt = datetime.datetime.strptime(end_date, "%Y-%m-%d").date()
+            trading_days = self.calendar.get_trading_days(start_dt, end_dt)
+            
+            logger.info(f"Found {len(trading_days)} trading days")
+            
+            # 获取历史数据
+            historical_data = self._load_historical_data(symbols, start_date, end_date, bar_interval)
+            
+            if not historical_data:
+                logger.error("Failed to load historical data")
+                return
+            
+            # 逐日回测
+            for trade_date in trading_days:
+                if not self.is_running:
+                    logger.info("Backtest stopped by user")
+                    break
                 
-                # 获取最新数据
-                bar = self.data_source.get_latest(symbol)
+                self.current_date = trade_date
+                date_str = trade_date.strftime("%Y-%m-%d")
                 
-                if bar is None:
-                    logger.warning("Failed to get latest bar")
-                    time.sleep(5)
-                    continue
+                # 更新日初资产（用于风控）
+                total_assets = self.exchange.get_total_assets()
+                self.risk_manager.set_daily_start_assets(total_assets)
                 
-                # 转换为Tick
-                tick = bar_to_tick(bar)
-                self.exchange.on_tick(tick)
-                
-                # 获取账户信息
-                account_info = self.get_account_info()
+                # 提取当日数据
+                daily_data = {}
+                for symbol, df in historical_data.items():
+                    if 'date' in df.columns:
+                        day_data = df[df['date'] == date_str]
+                        if not day_data.empty:
+                            daily_data[symbol] = day_data
                 
                 # 调用策略
                 try:
-                    signals = strategy_func(self, bar, account_info)
-                    if signals:
-                        self.process_signals(signals)
+                    strategy_func(self, trade_date, daily_data)
+                except Exception as e:
+                    logger.error(f"Strategy error on {date_str}: {e}")
+                
+                # 更新持仓市值（使用收盘价）
+                self._update_positions_value(daily_data)
+                
+                # T+1处理
+                date_timestamp = int(trade_date.strftime("%Y%m%d"))
+                self.exchange.update_daily(date_timestamp)
+                
+                # 记录权益曲线
+                self._record_equity(trade_date)
+                
+                logger.debug(f"Backtest progress: {date_str}, equity={total_assets:.2f}")
+            
+            logger.info("Backtest completed")
+            
+            # 生成绩效报告
+            self._generate_performance_report()
+            
+        except Exception as e:
+            logger.error(f"Backtest failed: {e}", exc_info=True)
+        finally:
+            self.is_running = False
+    
+    def start_realtime(
+        self,
+        symbols: List[str],
+        strategy_func: Callable,
+        update_interval: int = 60
+    ) -> None:
+        """
+        启动实时模拟
+        
+        Args:
+            symbols: 股票代码列表
+            strategy_func: 策略函数
+            update_interval: 更新间隔（秒）
+        """
+        import time
+        
+        logger.info(f"Starting realtime simulation: symbols={symbols}, interval={update_interval}s")
+        
+        self.mode = SimulationMode.REALTIME
+        self.is_running = True
+        
+        try:
+            while self.is_running:
+                now = datetime.datetime.now()
+                
+                # 检查是否在交易时间
+                if not self.calendar.is_trading_time(now):
+                    logger.debug(f"Not in trading hours, waiting...")
+                    time.sleep(update_interval)
+                    continue
+                
+                self.current_date = now.date()
+                
+                # 获取实时行情
+                realtime_data = self._fetch_realtime_data(symbols)
+                
+                if not realtime_data:
+                    logger.warning("Failed to fetch realtime data")
+                    time.sleep(update_interval)
+                    continue
+                
+                # 调用策略
+                try:
+                    strategy_func(self, now, realtime_data)
                 except Exception as e:
                     logger.error(f"Strategy error: {e}")
                 
-                # 每分钟保存快照
-                self.save_snapshot()
+                # 更新持仓市值
+                self._update_positions_value_realtime(realtime_data)
                 
-                # 等待下一分钟
-                self.calendar.wait_until_next_bar(60)
+                # 记录权益
+                self._record_equity(now.date())
+                
+                time.sleep(update_interval)
                 
         except KeyboardInterrupt:
-            logger.info("Interrupted by user")
+            logger.info("Realtime simulation stopped by user")
+        except Exception as e:
+            logger.error(f"Realtime simulation failed: {e}", exc_info=True)
         finally:
-            self.stop()
+            self.is_running = False
     
-    def process_signals(self, signals: Dict):
+    def stop(self) -> None:
+        """停止模拟"""
+        logger.info("Stopping simulation...")
+        self.is_running = False
+    
+    def submit_order(
+        self,
+        symbol: str,
+        side: str,
+        order_type: str,
+        volume: int,
+        price: float = 0.0
+    ) -> Optional[str]:
         """
-        处理策略信号
+        提交订单
         
         Args:
-            signals: 信号字典 {
-                'action': 'BUY' | 'SELL' | 'HOLD',
-                'symbol': str,
-                'volume': int,
-                'price': float (optional)
-            }
+            symbol: 股票代码
+            side: 买卖方向 'buy' or 'sell'
+            order_type: 订单类型 'market' or 'limit'
+            volume: 数量
+            price: 价格（限价单使用）
+            
+        Returns:
+            订单ID，失败返回None
         """
-        action = signals.get('action')
-        
-        if action == 'BUY':
-            self.buy(signals['symbol'], signals['volume'], signals.get('price'))
-        elif action == 'SELL':
-            self.sell(signals['symbol'], signals['volume'], signals.get('price'))
-        # HOLD: do nothing
-    
-    def buy(self, symbol: str, volume: int, price: float = None) -> str:
-        """下买单"""
-        order = sim.SimulatedOrder()
-        order.symbol = symbol
-        order.side = sim.OrderSide.BUY
-        order.type = sim.OrderType.MARKET if price is None else sim.OrderType.LIMIT
-        order.price = price if price else 0.0
-        order.volume = volume
-        
-        order_id = self.exchange.submit_order(order)
-        logger.info(f"Buy order submitted: {order_id}, {symbol} x{volume}")
-        
-        return order_id
-    
-    def sell(self, symbol: str, volume: int, price: float = None) -> str:
-        """下卖单"""
-        order = sim.SimulatedOrder()
-        order.symbol = symbol
-        order.side = sim.OrderSide.SELL
-        order.type = sim.OrderType.MARKET if price is None else sim.OrderType.LIMIT
-        order.price = price if price else 0.0
-        order.volume = volume
-        
-        order_id = self.exchange.submit_order(order)
-        logger.info(f"Sell order submitted: {order_id}, {symbol} x{volume}")
-        
-        return order_id
+        try:
+            # 风控检查
+            current_position = self._get_position_volume(symbol)
+            available_cash = self.exchange.get_available_cash()
+            total_assets = self.exchange.get_total_assets()
+            current_positions = self._get_current_positions_dict()
+            
+            risk_check = self.risk_manager.check_order(
+                symbol=symbol,
+                side=side,
+                price=price if price > 0 else self._get_latest_price(symbol),
+                volume=volume,
+                current_position=current_position,
+                available_cash=available_cash,
+                total_assets=total_assets,
+                current_positions=current_positions
+            )
+            
+            if risk_check.is_reject():
+                logger.warning(f"Order rejected by risk control: {risk_check.reason}")
+                return None
+            
+            # 创建C++订单对象
+            cpp_side = sim_cpp.OrderSide.BUY if side.lower() == 'buy' else sim_cpp.OrderSide.SELL
+            cpp_type = sim_cpp.OrderType.MARKET if order_type.lower() == 'market' else sim_cpp.OrderType.LIMIT
+            
+            order_id = f"ORD_{datetime.datetime.now().strftime('%Y%m%d%H%M%S%f')}"
+            submit_time = int(datetime.datetime.now().timestamp() * 1000)
+            
+            order = sim_cpp.SimulatedOrder(
+                order_id,
+                symbol,
+                cpp_side,
+                cpp_type,
+                price,
+                volume,
+                submit_time
+            )
+            
+            # 提交到C++交易所
+            result_order_id = self.exchange.submit_order(order)
+            
+            if result_order_id:
+                logger.info(f"Order submitted: {result_order_id}, {symbol} {side} {volume}@{price:.2f}")
+                
+                # 记录到数据库
+                self._save_order_to_db(order)
+                
+                # 回调
+                if self.on_order_callback:
+                    self.on_order_callback(order)
+                
+                return result_order_id
+            else:
+                logger.warning(f"Order submission failed")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Failed to submit order: {e}")
+            return None
     
     def cancel_order(self, order_id: str) -> bool:
-        """撤单"""
-        return self.exchange.cancel_order(order_id)
-    
-    def get_account_info(self) -> Dict:
-        """获取账户信息"""
-        positions = self.exchange.get_all_positions()
+        """
+        撤单
         
-        pos_list = []
-        for pos in positions:
-            pos_list.append({
-                'symbol': pos.symbol,
-                'volume': pos.volume,
-                'available_volume': pos.available_volume,
-                'avg_cost': pos.avg_cost,
-                'current_price': pos.current_price,
-                'market_value': pos.market_value,
-                'unrealized_pnl': pos.unrealized_pnl,
-                'unrealized_pnl_pct': pos.unrealized_pnl / (pos.avg_cost * pos.volume) * 100 if pos.volume > 0 else 0
-            })
-        
-        return {
-            'total_assets': self.exchange.get_total_assets(),
-            'available_cash': self.exchange.get_available_cash(),
-            'frozen_cash': self.exchange.get_frozen_cash(),
-            'positions': pos_list
-        }
-    
-    def save_snapshot(self):
-        """保存账户快照到数据库"""
+        Args:
+            order_id: 订单ID
+            
+        Returns:
+            是否成功
+        """
         try:
-            account_info = self.get_account_info()
+            success = self.exchange.cancel_order(order_id)
             
-            # 计算市值和盈亏
-            market_value = sum(p['market_value'] for p in account_info['positions'])
-            total_assets = account_info['total_assets']
-            initial_capital = self.config.initial_capital
-            total_pnl = total_assets - initial_capital
-            total_pnl_pct = (total_pnl / initial_capital) * 100
+            if success:
+                logger.info(f"Order cancelled: {order_id}")
+            else:
+                logger.warning(f"Failed to cancel order: {order_id}")
             
-            # 插入equity_curve表
-            self.db.execute_update("""
-                INSERT OR REPLACE INTO equity_curve (
-                    account_id, timestamp, total_assets, cash, market_value,
-                    total_pnl, total_pnl_pct, position_count
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                self.account_id,
-                int(time.time()),
-                total_assets,
-                account_info['available_cash'],
-                market_value,
-                total_pnl,
-                total_pnl_pct,
-                len(account_info['positions'])
-            ))
+            return success
             
         except Exception as e:
-            logger.error(f"Failed to save snapshot: {e}")
+            logger.error(f"Failed to cancel order: {e}")
+            return False
     
-    def stop(self):
-        """停止运行"""
-        self.is_running = False
-        self.save_snapshot()
-        logger.info("Simulation stopped")
+    def get_account_info(self) -> dict:
+        """
+        获取账户信息
+        
+        Returns:
+            账户信息字典
+        """
+        try:
+            return {
+                "account_id": self.exchange.get_account_id(),
+                "available_cash": self.exchange.get_available_cash(),
+                "frozen_cash": self.exchange.get_frozen_cash(),
+                "total_assets": self.exchange.get_total_assets(),
+            }
+        except Exception as e:
+            logger.error(f"Failed to get account info: {e}")
+            return {}
     
-    def _print_summary(self):
-        """打印汇总信息"""
-        account_info = self.get_account_info()
+    def get_positions(self) -> List[dict]:
+        """
+        获取持仓列表
         
-        print("\n" + "=" * 60)
-        print("Simulation Summary")
-        print("=" * 60)
-        print(f"Total assets: {account_info['total_assets']:.2f}")
-        print(f"Available cash: {account_info['available_cash']:.2f}")
-        print(f"Market value: {sum(p['market_value'] for p in account_info['positions']):.2f}")
-        print(f"Positions: {len(account_info['positions'])}")
-        
-        for pos in account_info['positions']:
-            print(f"  {pos['symbol']}: {pos['volume']} shares, PnL: {pos['unrealized_pnl']:.2f} ({pos['unrealized_pnl_pct']:.2f}%)")
-        
-        print("=" * 60 + "\n")
-
-
-if __name__ == "__main__":
-    # 简单测试
-    logging.basicConfig(level=logging.INFO)
+        Returns:
+            持仓列表
+        """
+        try:
+            cpp_positions = self.exchange.get_all_positions()
+            
+            positions = []
+            for pos in cpp_positions:
+                positions.append({
+                    "symbol": pos.symbol,
+                    "volume": pos.volume,
+                    "available_volume": pos.available_volume,
+                    "frozen_volume": pos.frozen_volume,
+                    "avg_cost": pos.avg_cost,
+                    "current_price": pos.current_price,
+                    "market_value": pos.market_value,
+                    "unrealized_pnl": pos.unrealized_pnl,
+                    "buy_date": pos.buy_date,
+                })
+            
+            return positions
+            
+        except Exception as e:
+            logger.error(f"Failed to get positions: {e}")
+            return []
     
-    print("=" * 60)
-    print("ApexQuant Simulation Controller Test")
-    print("=" * 60)
-    
-    # 创建控制器
-    try:
-        controller = SimulationController(
-            mode=SimulationMode.BACKTEST,
-            initial_capital=1000000
-        )
+    def get_pending_orders(self, symbol: Optional[str] = None) -> List[dict]:
+        """
+        获取待成交订单
         
-        print(f"\n[OK] Controller created, account: {controller.account_id}")
-        print(f"Initial cash: {controller.exchange.get_available_cash():.2f}")
-        
-    except Exception as e:
-        print(f"\n[ERROR] {e}")
-        print("Note: C++ module needs to be compiled first")
+        Args:
+            symbol: 股票代码（可选）
+            
+        Returns:
+            订单列表
+        """
+        try:
+            if symbol:
+                cpp_orders = self.exchange.get_pending_orders(symbol)
+            else:
+                cpp_orders = self.exchange.get_pending_orders()
+            
+            orders = []
+            for order in cpp_orders:
+                orders.append(self._cpp_order_to_dict(order))
+            
+            return orders
+            
+        except Exception as e:
+            logger.error(f"Failed to get pending orders: {e}")
+            return []
     
-    print("\n" + "=" * 60)
+    def get_trade_history(self) -> List[dict]:
+        """
+        获取成交历史
+        
+        Returns:
+            成交记录列表
+        """
+        try:
+            cpp_trades = self.exchange.get_trade_history()
+            
+            trades = []
+            for trade in cpp_trades:
+                trades.append({
+                    "trade_id": trade.trade_id,
+                    "order_id": trade.order_id,
+                    "symbol": trade.symbol,
+                    "side": "buy" if trade.side == sim_cpp.OrderSide.BUY else "sell",
+                    "price": trade.price,
+                    "volume": trade.volume,
+                    "commission": trade.commission,
+                    "timestamp": trade.timestamp,
+                    "realized_pnl": trade.realized_pnl,
+                })
+            
+            return trades
+            
+        except Exception as e:
+            logger.error(f"Failed to get trade history: {e}")
+            return []
+    
+    # ========================================================================
+    # 私有辅助方法
+    # ========================================================================
+    
+    def _load_historical_data(
+        self,
+        symbols: List[str],
+        start_date: str,
+        end_date: str,
+        freq: str = "d"
+    ) -> Dict[str, pd.DataFrame]:
+        """加载历史数据"""
+        data = {}
+        
+        for symbol in symbols:
+            df = self.data_source.get_stock_data(symbol, start_date, end_date, freq)
+            if df is not None and not df.empty:
+                data[symbol] = df
+                logger.info(f"Loaded {len(df)} rows for {symbol}")
+            else:
+                logger.warning(f"No data for {symbol}")
+        
+        return data
+    
+    def _fetch_realtime_data(self, symbols: List[str]) -> Dict[str, dict]:
+        """获取实时数据"""
+        quotes_df = self.data_source.get_realtime_quotes(symbols)
+        
+        if quotes_df is None or quotes_df.empty:
+            return {}
+        
+        data = {}
+        for _, row in quotes_df.iterrows():
+            symbol = row.get('symbol') or row.get('code')
+            if symbol:
+                data[symbol] = row.to_dict()
+        
+        return data
+    
+    def _update_positions_value(self, daily_data: Dict[str, pd.DataFrame]) -> None:
+        """更新持仓市值（回测模式）"""
+        positions = self.get_positions()
+        
+        for pos in positions:
+            symbol = pos['symbol']
+            if symbol in daily_data:
+                df = daily_data[symbol]
+                if not df.empty and 'close' in df.columns:
+                    close_price = float(df.iloc[-1]['close'])
+                    # TODO: 更新持仓价格到C++
+                    # self.exchange.update_position_price(symbol, close_price)
+    
+    def _update_positions_value_realtime(self, realtime_data: Dict[str, dict]) -> None:
+        """更新持仓市值（实时模式）"""
+        positions = self.get_positions()
+        
+        for pos in positions:
+            symbol = pos['symbol']
+            if symbol in realtime_data:
+                price = realtime_data[symbol].get('current') or realtime_data[symbol].get('price')
+                if price:
+                    # TODO: 更新持仓价格到C++
+                    pass
+    
+    def _record_equity(self, date: datetime.date) -> None:
+        """记录权益曲线"""
+        try:
+            total_assets = self.exchange.get_total_assets()
+            self.database.save_equity_curve(self.account_id, date, total_assets)
+        except Exception as e:
+            logger.error(f"Failed to record equity: {e}")
+    
+    def _get_position_volume(self, symbol: str) -> int:
+        """获取持仓数量"""
+        try:
+            pos = self.exchange.get_position(symbol)
+            return pos.volume
+        except:
+            return 0
+    
+    def _get_latest_price(self, symbol: str) -> float:
+        """获取最新价格"""
+        price = self.data_source.get_latest_price(symbol)
+        return price if price else 0.0
+    
+    def _get_current_positions_dict(self) -> Dict[str, dict]:
+        """获取当前持仓字典"""
+        positions = self.get_positions()
+        return {
+            pos['symbol']: {
+                'volume': pos['volume'],
+                'value': pos['market_value'],
+                'avg_cost': pos['avg_cost'],
+                'current_price': pos['current_price'],
+            }
+            for pos in positions
+        }
+    
+    def _save_order_to_db(self, order: sim_cpp.SimulatedOrder) -> None:
+        """保存订单到数据库"""
+        try:
+            self.database.save_order(
+                account_id=self.account_id,
+                order_id=order.order_id,
+                symbol=order.symbol,
+                side="buy" if order.side == sim_cpp.OrderSide.BUY else "sell",
+                order_type="market" if order.type == sim_cpp.OrderType.MARKET else "limit",
+                price=order.price,
+                volume=order.volume,
+                status="pending"
+            )
+        except Exception as e:
+            logger.error(f"Failed to save order to db: {e}")
+    
+    def _cpp_order_to_dict(self, order: sim_cpp.SimulatedOrder) -> dict:
+        """将C++订单转为字典"""
+        return {
+            "order_id": order.order_id,
+            "symbol": order.symbol,
+            "side": "buy" if order.side == sim_cpp.OrderSide.BUY else "sell",
+            "type": "market" if order.type == sim_cpp.OrderType.MARKET else "limit",
+            "price": order.price,
+            "volume": order.volume,
+            "filled_volume": order.filled_volume,
+            "status": self._cpp_status_to_str(order.status),
+            "submit_time": order.submit_time,
+        }
+    
+    def _cpp_status_to_str(self, status) -> str:
+        """将C++订单状态转为字符串"""
+        if status == sim_cpp.OrderStatus.PENDING:
+            return "pending"
+        elif status == sim_cpp.OrderStatus.PARTIAL_FILLED:
+            return "partial_filled"
+        elif status == sim_cpp.OrderStatus.FILLED:
+            return "filled"
+        elif status == sim_cpp.OrderStatus.CANCELLED:
+            return "cancelled"
+        elif status == sim_cpp.OrderStatus.REJECTED:
+            return "rejected"
+        else:
+            return "unknown"
+    
+    def _generate_performance_report(self) -> None:
+        """生成绩效报告"""
+        try:
+            # 从数据库获取权益曲线
+            equity_curve = self.database.get_equity_curve(self.account_id)
+            
+            # 获取交易记录
+            trades = self.get_trade_history()
+            
+            # 分析绩效
+            metrics = self.performance_analyzer.analyze(equity_curve, trades)
+            
+            # 生成报告
+            report = self.performance_analyzer.generate_report(metrics)
+            
+            # 打印报告
+            print(report)
+            
+            # 保存到文件
+            report_path = Path("reports") / f"performance_{self.account_id}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            with open(report_path, 'w', encoding='utf-8') as f:
+                f.write(report)
+            
+            logger.info(f"Performance report saved to {report_path}")
+            
+        except Exception as e:
+            logger.error(f"Failed to generate performance report: {e}")

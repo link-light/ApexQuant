@@ -4,7 +4,7 @@
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 # 收集源文件（排除simulation模块，单独编译）
-file(GLOB_RECURSE CORE_SOURCES 
+set(CORE_SOURCES 
     ${CMAKE_CURRENT_SOURCE_DIR}/src/backtest_engine.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/bindings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/connection_manager.cpp
@@ -35,6 +35,7 @@ set_target_properties(apexquant_core PROPERTIES
 # Windows 特殊处理
 if(MSVC)
     target_compile_definitions(apexquant_core PRIVATE _USE_MATH_DEFINES)
+    target_compile_options(apexquant_core PRIVATE /utf-8)
     # 设置多配置生成器的输出目录
     foreach(CONFIG ${CMAKE_CONFIGURATION_TYPES})
         string(TOUPPER ${CONFIG} CONFIG_UPPER)
@@ -81,6 +82,7 @@ set_target_properties(apexquant_simulation PROPERTIES
 # Windows 特殊处理
 if(MSVC)
     target_compile_definitions(apexquant_simulation PRIVATE _USE_MATH_DEFINES)
+    target_compile_options(apexquant_simulation PRIVATE /utf-8)
     # 设置多配置生成器的输出目录
     foreach(CONFIG ${CMAKE_CONFIGURATION_TYPES})
         string(TOUPPER ${CONFIG} CONFIG_UPPER)

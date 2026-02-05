@@ -23,25 +23,25 @@ PYBIND11_MODULE(apexquant_simulation, m) {
     m.doc() = "ApexQuant Simulation Trading Module";
     
     // ========================================================================
-    // 枚举类型
+    // 枚举类型（使用simulation命名空间）
     // ========================================================================
     
-    py::enum_<OrderSide>(m, "OrderSide", "Order side enum")
-        .value("BUY", OrderSide::BUY, "Buy order")
-        .value("SELL", OrderSide::SELL, "Sell order")
+    py::enum_<simulation::OrderSide>(m, "OrderSide", "Order side enum")
+        .value("BUY", simulation::OrderSide::BUY, "Buy order")
+        .value("SELL", simulation::OrderSide::SELL, "Sell order")
         .export_values();
     
-    py::enum_<OrderType>(m, "OrderType", "Order type enum")
-        .value("MARKET", OrderType::MARKET, "Market order")
-        .value("LIMIT", OrderType::LIMIT, "Limit order")
+    py::enum_<simulation::OrderType>(m, "OrderType", "Order type enum")
+        .value("MARKET", simulation::OrderType::MARKET, "Market order")
+        .value("LIMIT", simulation::OrderType::LIMIT, "Limit order")
         .export_values();
     
-    py::enum_<OrderStatus>(m, "OrderStatus", "Order status enum")
-        .value("PENDING", OrderStatus::PENDING, "Pending")
-        .value("PARTIAL_FILLED", OrderStatus::PARTIAL_FILLED, "Partially filled")
-        .value("FILLED", OrderStatus::FILLED, "Completely filled")
-        .value("CANCELLED", OrderStatus::CANCELLED, "Cancelled")
-        .value("REJECTED", OrderStatus::REJECTED, "Rejected")
+    py::enum_<simulation::OrderStatus>(m, "OrderStatus", "Order status enum")
+        .value("PENDING", simulation::OrderStatus::PENDING, "Pending")
+        .value("PARTIAL_FILLED", simulation::OrderStatus::PARTIAL_FILLED, "Partially filled")
+        .value("FILLED", simulation::OrderStatus::FILLED, "Completely filled")
+        .value("CANCELLED", simulation::OrderStatus::CANCELLED, "Cancelled")
+        .value("REJECTED", simulation::OrderStatus::REJECTED, "Rejected")
         .export_values();
     
     // ========================================================================
@@ -50,7 +50,7 @@ PYBIND11_MODULE(apexquant_simulation, m) {
     
     py::class_<SimulatedOrder>(m, "SimulatedOrder", "Simulated order")
         .def(py::init<>())
-        .def(py::init<const std::string&, const std::string&, OrderSide, OrderType, 
+        .def(py::init<const std::string&, const std::string&, simulation::OrderSide, simulation::OrderType, 
                      double, int64_t, int64_t>(),
              py::arg("order_id"),
              py::arg("symbol"),
@@ -73,26 +73,26 @@ PYBIND11_MODULE(apexquant_simulation, m) {
         .def("__repr__", &SimulatedOrder::toString);
     
     // ========================================================================
-    // 结构体 - Position
+    // 结构体 - Position（使用simulation命名空间）
     // ========================================================================
     
-    py::class_<Position>(m, "Position", "Position information")
+    py::class_<simulation::Position>(m, "Position", "Position information")
         .def(py::init<>())
         .def(py::init<const std::string&, int64_t, double, int64_t>(),
              py::arg("symbol"),
              py::arg("volume"),
              py::arg("cost"),
              py::arg("buy_date"))
-        .def_readonly("symbol", &Position::symbol, "Symbol")
-        .def_readonly("volume", &Position::volume, "Total volume")
-        .def_readonly("available_volume", &Position::available_volume, "Available volume (T+1)")
-        .def_readonly("frozen_volume", &Position::frozen_volume, "Frozen volume")
-        .def_readonly("avg_cost", &Position::avg_cost, "Average cost")
-        .def_readonly("current_price", &Position::current_price, "Current price")
-        .def_readonly("market_value", &Position::market_value, "Market value")
-        .def_readonly("unrealized_pnl", &Position::unrealized_pnl, "Unrealized PnL")
-        .def_readonly("buy_date", &Position::buy_date, "Buy date (YYYYMMDD)")
-        .def("__repr__", &Position::toString);
+        .def_readonly("symbol", &simulation::Position::symbol, "Symbol")
+        .def_readonly("volume", &simulation::Position::volume, "Total volume")
+        .def_readonly("available_volume", &simulation::Position::available_volume, "Available volume (T+1)")
+        .def_readonly("frozen_volume", &simulation::Position::frozen_volume, "Frozen volume")
+        .def_readonly("avg_cost", &simulation::Position::avg_cost, "Average cost")
+        .def_readonly("current_price", &simulation::Position::current_price, "Current price")
+        .def_readonly("market_value", &simulation::Position::market_value, "Market value")
+        .def_readonly("unrealized_pnl", &simulation::Position::unrealized_pnl, "Unrealized PnL")
+        .def_readonly("buy_date", &simulation::Position::buy_date, "Buy date (YYYYMMDD)")
+        .def("__repr__", &simulation::Position::toString);
     
     // ========================================================================
     // 结构体 - TradeRecord
@@ -101,7 +101,7 @@ PYBIND11_MODULE(apexquant_simulation, m) {
     py::class_<TradeRecord>(m, "TradeRecord", "Trade record")
         .def(py::init<>())
         .def(py::init<const std::string&, const std::string&, const std::string&,
-                     OrderSide, double, int64_t, double, int64_t>(),
+                     simulation::OrderSide, double, int64_t, double, int64_t>(),
              py::arg("trade_id"),
              py::arg("order_id"),
              py::arg("symbol"),
@@ -139,20 +139,10 @@ PYBIND11_MODULE(apexquant_simulation, m) {
         .def("__repr__", &MatchResult::toString);
     
     // ========================================================================
-    // 主项目的Tick结构体（如果还没有绑定）
+    // Tick类型说明
     // ========================================================================
-    
-    if (!py::hasattr(m, "Tick")) {
-        py::class_<Tick>(m, "Tick", "Market tick data")
-            .def(py::init<>())
-            .def_readwrite("symbol", &Tick::symbol, "Symbol")
-            .def_readwrite("timestamp", &Tick::timestamp, "Timestamp (Unix ms)")
-            .def_readwrite("last_price", &Tick::last_price, "Last price")
-            .def_readwrite("bid_price", &Tick::bid_price, "Bid price")
-            .def_readwrite("ask_price", &Tick::ask_price, "Ask price")
-            .def_readwrite("volume", &Tick::volume, "Volume")
-            .def_readwrite("last_close", &Tick::last_close, "Last close price");
-    }
+    // Tick类型已在apexquant_core模块中注册，simulation模块直接使用
+    // 无需重复绑定，避免"type already registered"错误
     
     // ========================================================================
     // 主类 - SimulatedExchange

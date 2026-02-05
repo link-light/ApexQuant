@@ -19,6 +19,7 @@ struct Tick {
     double ask_price;          // 卖一价
     int64_t volume;           // 成交量
     double amount;            // 成交额
+    double last_close;        // 昨收价（用于涨跌停判断）
     
     // 五档行情（可选扩展）
     std::vector<double> bid_prices;   // 买价列表
@@ -28,12 +29,12 @@ struct Tick {
     
     Tick() 
         : timestamp(0), last_price(0.0), bid_price(0.0), 
-          ask_price(0.0), volume(0), amount(0.0) {}
+          ask_price(0.0), volume(0), amount(0.0), last_close(0.0) {}
     
     Tick(const std::string& sym, int64_t ts, double last, 
          double bid, double ask, int64_t vol)
         : symbol(sym), timestamp(ts), last_price(last),
-          bid_price(bid), ask_price(ask), volume(vol), amount(0.0) {}
+          bid_price(bid), ask_price(ask), volume(vol), amount(0.0), last_close(0.0) {}
     
     // 获取中间价
     double mid_price() const {

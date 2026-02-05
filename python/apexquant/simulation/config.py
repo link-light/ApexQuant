@@ -1,58 +1,150 @@
 """
-ApexQuant 模拟盘配置管理模块
-
-提供统一的配置加载和访问接口
+ApexQuant Simulation Configuration Manager
+配置文件管理器
 """
 
-import yaml
 import os
+import yaml
+from typing import Dict, Any, Optional
+from pathlib import Path
 import logging
-from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class SimulationConfig:
-    """模拟盘配置管理类"""
+    """模拟盘配置管理器"""
     
-    def __init__(self, config_path: str = "config/simulation_config.yaml"):
+    def __init__(self, config_path: Optional[str] = None):
         """
-        初始化配置
+        初始化配置管理器
         
         Args:
-            config_path: 配置文件路径
+            config_path: 配置文件路径，默认为 config/simulation_config.yaml
         """
-        self.config_path = config_path
+        if config_path is None:
+            # 默认配置文件路径
+            project_root = Path(__file__).parent.parent.parent.parent
+            config_path = project_root / "config" / "simulation_config.yaml"
+        
+        self.config_path = Path(config_path)
         self.config: Dict[str, Any] = {}
+        
+        # 加载配置
         self.load_config()
     
-    def load_config(self):
+    def load_config(self) -> None:
         """加载配置文件"""
-        try:
-            if not os.path.exists(self.config_path):
-                logger.warning(f"Config file not found: {self.config_path}, using defaults")
-                self.config = self._get_default_config()
-                return
-            
-            with open(self.config_path, 'r', encoding='utf-8') as f:
-                self.config = yaml.safe_load(f)
-            
-            logger.info(f"Config loaded from: {self.config_path}")
-            
-            # 验证配置
-            if not self.validate_config():
-                logger.warning("Config validation failed, some settings may be incorrect")
-                
-        except Exception as e:
-            logger.error(f"Failed to load config: {e}")
+        if not self.config_path.exists():
+            logger.warning(f"Config file not found: {self.config_path}, using default config")
             self.config = self._get_default_config()
+            # 创建默认配置文件
+            self.save_config()
+        else:
+            try:
+                with open(self.config_path, 'r', encoding='utf-8') as f:
+                    self.config = yaml.safe_load(f)
+                logger.info(f"Config loaded from {self.config_path}")
+            except Exception as e:
+                logger.error(f"Failed to load config: {e}, using default config")
+                self.config = self._get_default_config()
+    
+    def save_config(self) -> None:
+        """保存配置到文件"""
+        try:
+            # 确保目录存在
+            self.config_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            with open(self.config_path, 'w', encoding='utf-8') as f:
+                yaml.dump(self.config, f, allow_unicode=True, default_flow_style=False)
+            logger.info(f"Config saved to {self.config_path}")
+        except Exception as e:
+            logger.error(f"Failed to save config: {e}")
+    
+    def _get_default_config(self) -> Dict[str, Any]:
+        """获取默认配置"""
+        return {
+            # 账户配置
+            "account": {
+                "account_id": "simulation_001",
+                "initial_capital": 100000.0,  # 初始资金10万
+                "commission_rate": 0.00025,   # 手续费万2.5
+                "stamp_tax_rate": 0.001,      # 印花税千一（仅卖出）
+                "slippage_rate": 0.0001,      # 滑点率万一
+            },
+            
+            # 数据源配置
+            "data_source": {
+                "primary": "baostock",        # 主数据源
+                "backup": "akshare",          # 备用数据源
+                "proxy": None,                # 代理设置（None表示不使用）
+            },
+            
+            # 交易时间配置
+            "trading_hours": {
+                "morning_start": "09:30",
+                "morning_end": "11:30",
+                "afternoon_start": "13:00",
+                "afternoon_end": "15:00",
+            },
+            
+            # 风控配置
+            "risk_control": {
+                "max_single_position_pct": 0.3,      # 单只股票最大仓位30%
+                "max_total_position_pct": 0.95,      # 总仓位最大95%
+                "max_single_order_amount": 50000.0,  # 单笔最大下单金额5万
+                "daily_loss_limit_pct": 0.05,        # 日亏损限制5%
+                "stop_loss_pct": 0.1,                # 止损比例10%
+                "take_profit_pct": 0.2,              # 止盈比例20%
+                "enable_risk_control": True,         # 是否启用风控
+            },
+            
+            # AI顾问配置
+            "ai_advisor": {
+                "enabled": True,                     # 是否启用AI顾问
+                "model": "deepseek-chat",            # 模型名称
+                "api_key": "",                       # API密钥（需要用户填写）
+                "base_url": "https://api.deepseek.com",
+                "max_calls_per_day": 100,            # 每日最大调用次数
+                "temperature": 0.7,                  # 温度参数
+                "max_tokens": 2000,                  # 最大token数
+            },
+            
+            # 回测配置
+            "backtest": {
+                "start_date": "2023-01-01",
+                "end_date": "2024-12-31",
+                "bar_interval": "1m",                # K线周期：1m, 5m, 15m, 30m, 1h, 1d
+            },
+            
+            # 实时模拟配置
+            "realtime": {
+                "update_interval": 60,               # 数据更新间隔（秒）
+                "auto_trade": False,                 # 是否自动交易
+            },
+            
+            # 数据库配置
+            "database": {
+                "path": "data/simulation.db",        # SQLite数据库路径
+                "auto_backup": True,                 # 是否自动备份
+                "backup_interval": 3600,             # 备份间隔（秒）
+            },
+            
+            # 日志配置
+            "logging": {
+                "level": "INFO",                     # 日志级别
+                "file": "logs/simulation.log",       # 日志文件
+                "max_size": "10MB",                  # 单个日志文件最大大小
+                "backup_count": 5,                   # 保留日志文件数
+            },
+        }
     
     def get(self, key_path: str, default: Any = None) -> Any:
         """
         获取配置项（支持点号分隔的路径）
         
         Args:
-            key_path: 配置键路径，如 'risk.max_single_position_pct'
+            key_path: 配置路径，如 "account.initial_capital"
             default: 默认值
             
         Returns:
@@ -61,274 +153,101 @@ class SimulationConfig:
         keys = key_path.split('.')
         value = self.config
         
-        try:
-            for key in keys:
+        for key in keys:
+            if isinstance(value, dict) and key in value:
                 value = value[key]
-            return value
-        except (KeyError, TypeError):
-            return default
+            else:
+                return default
+        
+        return value
     
-    def get_trading_config(self) -> Dict:
-        """获取交易配置"""
-        return self.get('trading', {})
+    def set(self, key_path: str, value: Any) -> None:
+        """
+        设置配置项
+        
+        Args:
+            key_path: 配置路径
+            value: 配置值
+        """
+        keys = key_path.split('.')
+        config = self.config
+        
+        # 导航到最后一级
+        for key in keys[:-1]:
+            if key not in config:
+                config[key] = {}
+            config = config[key]
+        
+        # 设置值
+        config[keys[-1]] = value
+        logger.debug(f"Config updated: {key_path} = {value}")
     
-    def get_risk_config(self) -> Dict:
+    def get_account_config(self) -> Dict[str, Any]:
+        """获取账户配置"""
+        return self.config.get("account", {})
+    
+    def get_risk_config(self) -> Dict[str, Any]:
         """获取风控配置"""
-        return self.get('risk', {})
+        return self.config.get("risk_control", {})
     
-    def get_ai_config(self) -> Dict:
-        """
-        获取AI配置
-        
-        特别处理：从环境变量读取API Key
-        """
-        ai_config = self.get('ai', {}).copy()
-        
-        # 从环境变量读取API Key
-        api_key_env = ai_config.get('api_key_env', 'DEEPSEEK_API_KEY')
-        api_key = os.getenv(api_key_env)
-        
-        if api_key:
-            ai_config['api_key'] = api_key
-        else:
-            logger.warning(f"API Key not found in environment variable: {api_key_env}")
-            ai_config['api_key'] = None
-        
-        return ai_config
+    def get_ai_config(self) -> Dict[str, Any]:
+        """获取AI配置"""
+        return self.config.get("ai_advisor", {})
     
-    def get_data_source_config(self) -> Dict:
+    def get_data_source_config(self) -> Dict[str, Any]:
         """获取数据源配置"""
-        return self.get('data_source', {})
+        return self.config.get("data_source", {})
     
-    def get_logging_config(self) -> Dict:
-        """获取日志配置"""
-        return self.get('logging', {})
-    
-    def get_strategy_config(self) -> Dict:
-        """获取策略配置"""
-        return self.get('strategy', {})
-    
-    # ========================================================================
-    # 常用配置项的快捷访问（property）
-    # ========================================================================
-    
-    @property
-    def initial_capital(self) -> float:
-        """初始资金"""
-        return self.get('simulation.initial_capital', 1000000.0)
-    
-    @property
-    def database_path(self) -> str:
-        """数据库路径"""
-        return self.get('simulation.database_path', 'data/sim_trader.db')
-    
-    @property
-    def commission_rate(self) -> float:
-        """手续费率"""
-        return self.get('trading.commission_rate', 0.00025)
-    
-    @property
-    def slippage_rate(self) -> float:
-        """滑点率"""
-        return self.get('trading.slippage_rate', 0.0001)
-    
-    @property
-    def max_single_position_pct(self) -> float:
-        """单品种最大仓位"""
-        return self.get('risk.max_single_position_pct', 0.20)
-    
-    @property
-    def max_total_position_pct(self) -> float:
-        """总仓位上限"""
-        return self.get('risk.max_total_position_pct', 0.80)
-    
-    @property
-    def ai_enabled(self) -> bool:
-        """AI是否启用"""
-        return self.get('ai.enabled', False)
-    
-    @property
-    def data_provider(self) -> str:
-        """数据提供商"""
-        return self.get('data_source.provider', 'baostock')
-    
-    @property
-    def log_level(self) -> str:
-        """日志级别"""
-        return self.get('logging.level', 'INFO')
-    
-    # ========================================================================
-    # 配置验证
-    # ========================================================================
-    
-    def validate_config(self) -> bool:
+    def validate(self) -> bool:
         """
-        验证配置合法性
+        验证配置完整性
         
         Returns:
-            是否验证通过
+            True if valid, False otherwise
         """
-        valid = True
-        
-        # 检查百分比值在0-1之间
-        pct_keys = [
-            'risk.max_single_position_pct',
-            'risk.max_total_position_pct',
-            'risk.max_single_order_pct',
-            'risk.max_daily_loss_pct',
-            'risk.stop_loss_pct',
-            'risk.take_profit_pct',
+        required_sections = [
+            "account", "data_source", "risk_control", 
+            "ai_advisor", "database"
         ]
         
-        for key in pct_keys:
-            value = self.get(key)
-            if value is not None and (value < 0 or value > 1):
-                logger.error(f"Invalid percentage value for {key}: {value}")
-                valid = False
+        for section in required_sections:
+            if section not in self.config:
+                logger.error(f"Missing required config section: {section}")
+                return False
         
-        # 检查初始资金为正
-        if self.initial_capital <= 0:
-            logger.error(f"Initial capital must be positive: {self.initial_capital}")
-            valid = False
+        # 验证初始资金
+        initial_capital = self.get("account.initial_capital", 0)
+        if initial_capital <= 0:
+            logger.error(f"Invalid initial_capital: {initial_capital}")
+            return False
         
-        # 检查数据源
-        provider = self.data_provider
-        if provider not in ['baostock', 'akshare', 'mock']:
-            logger.warning(f"Unknown data provider: {provider}")
+        # 验证费率
+        commission_rate = self.get("account.commission_rate", 0)
+        if commission_rate < 0 or commission_rate > 0.01:  # 费率不应超过1%
+            logger.error(f"Invalid commission_rate: {commission_rate}")
+            return False
         
-        return valid
-    
-    # ========================================================================
-    # 默认配置
-    # ========================================================================
-    
-    @staticmethod
-    def _get_default_config() -> Dict:
-        """获取默认配置"""
-        return {
-            'simulation': {
-                'mode': 'backtest',
-                'initial_capital': 1000000,
-                'database_path': 'data/sim_trader.db'
-            },
-            'trading': {
-                'commission_rate': 0.00025,
-                'stamp_tax_rate': 0.001,
-                'slippage_rate': 0.0001,
-                'min_order_volume': 100
-            },
-            'risk': {
-                'max_single_position_pct': 0.20,
-                'max_total_position_pct': 0.80,
-                'max_single_order_pct': 0.05,
-                'max_daily_loss_pct': 0.05,
-                'stop_loss_pct': 0.10,
-                'take_profit_pct': 0.20,
-                'max_daily_trades': 100,
-                'min_hold_seconds': 60
-            },
-            'ai': {
-                'enabled': False,
-                'api_key_env': 'DEEPSEEK_API_KEY',
-                'model': 'deepseek-chat',
-                'base_url': 'https://api.deepseek.com',
-                'call_interval_minutes': 5,
-                'daily_call_limit': 100,
-                'confidence_threshold': 0.7,
-                'timeout': 10
-            },
-            'data_source': {
-                'provider': 'baostock',
-                'backup_provider': 'akshare',
-                'frequency': '1min',
-                'cache_enabled': True,
-                'cache_dir': 'data/cache',
-                'retry_times': 3,
-                'retry_interval': 1
-            },
-            'logging': {
-                'level': 'INFO',
-                'file': 'logs/simulation.log',
-                'console': True,
-                'format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                'max_bytes': 10485760,
-                'backup_count': 5
-            },
-            'strategy': {
-                'name': 'ma_cross',
-                'parameters': {
-                    'ma_short': 5,
-                    'ma_long': 20,
-                    'rsi_period': 14,
-                    'buy_threshold': 30,
-                    'sell_threshold': 70
-                }
-            }
-        }
+        logger.info("Config validation passed")
+        return True
 
 
-# ============================================================================
-# 全局配置实例（单例模式）
-# ============================================================================
-
-_config: Optional[SimulationConfig] = None
+# 全局配置实例
+_global_config: Optional[SimulationConfig] = None
 
 
 def get_config(config_path: Optional[str] = None) -> SimulationConfig:
     """
-    获取全局配置实例（单例）
+    获取全局配置实例（单例模式）
     
     Args:
-        config_path: 配置文件路径（仅首次调用有效）
+        config_path: 配置文件路径
         
     Returns:
-        SimulationConfig实例
+        配置实例
     """
-    global _config
+    global _global_config
     
-    if _config is None:
-        if config_path is None:
-            config_path = "config/simulation_config.yaml"
-        _config = SimulationConfig(config_path)
+    if _global_config is None or config_path is not None:
+        _global_config = SimulationConfig(config_path)
     
-    return _config
-
-
-def reset_config():
-    """重置全局配置（主要用于测试）"""
-    global _config
-    _config = None
-
-
-if __name__ == "__main__":
-    # 测试代码
-    logging.basicConfig(level=logging.INFO)
-    
-    print("=" * 60)
-    print("ApexQuant Config Test")
-    print("=" * 60)
-    
-    config = get_config()
-    
-    print(f"\nInitial capital: {config.initial_capital}")
-    print(f"Database path: {config.database_path}")
-    print(f"Commission rate: {config.commission_rate}")
-    print(f"Max single position: {config.max_single_position_pct * 100}%")
-    print(f"AI enabled: {config.ai_enabled}")
-    print(f"Data provider: {config.data_provider}")
-    
-    print("\nRisk config:")
-    risk_config = config.get_risk_config()
-    for key, value in risk_config.items():
-        print(f"  {key}: {value}")
-    
-    print("\nStrategy config:")
-    strategy_config = config.get_strategy_config()
-    print(f"  name: {strategy_config.get('name')}")
-    print(f"  parameters: {strategy_config.get('parameters')}")
-    
-    print("\nValidation result:", config.validate_config())
-    
-    print("\n" + "=" * 60)
-    print("[OK] Config test passed!")
-    print("=" * 60)
+    return _global_config

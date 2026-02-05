@@ -1,291 +1,276 @@
 """
-ApexQuant 交易日历管理模块
-
-提供交易时间判断和节假日检查功能
+ApexQuant Trading Calendar
+A股交易日历管理器
 """
 
 import datetime
+from typing import List, Optional, Set
+from chinese_calendar import is_workday, is_holiday
 import logging
-from typing import Optional
-
-try:
-    import chinese_calendar as cc
-    CHINESE_CALENDAR_AVAILABLE = True
-except ImportError:
-    CHINESE_CALENDAR_AVAILABLE = False
-    logging.warning("chinese_calendar not installed, holiday check will be disabled")
 
 logger = logging.getLogger(__name__)
 
 
 class TradingCalendar:
-    """交易日历管理器"""
-    
-    # A股交易时间段（北京时间）
-    MORNING_START = datetime.time(9, 30)    # 早盘开始
-    MORNING_END = datetime.time(11, 30)      # 早盘结束
-    AFTERNOON_START = datetime.time(13, 0)  # 午盘开始
-    AFTERNOON_END = datetime.time(15, 0)    # 午盘结束
-    
-    # 集合竞价时间
-    CALL_AUCTION_START = datetime.time(9, 15)  # 集合竞价开始
-    CALL_AUCTION_END = datetime.time(9, 25)    # 集合竞价结束
+    """A股交易日历管理器"""
     
     def __init__(self):
         """初始化交易日历"""
-        self.use_holiday_check = CHINESE_CALENDAR_AVAILABLE
+        # A股交易时间段（小时:分钟）
+        self.morning_start = datetime.time(9, 30)
+        self.morning_end = datetime.time(11, 30)
+        self.afternoon_start = datetime.time(13, 0)
+        self.afternoon_end = datetime.time(15, 0)
+        
+        # 集合竞价时间
+        self.call_auction_start = datetime.time(9, 15)
+        self.call_auction_end = datetime.time(9, 25)
+        
+        # 尾盘集合竞价
+        self.close_auction_start = datetime.time(14, 57)
+        self.close_auction_end = datetime.time(15, 0)
     
-    def is_trading_day(self, date: datetime.date = None) -> bool:
+    def is_trading_day(self, date: datetime.date) -> bool:
         """
         判断是否为交易日
         
         Args:
-            date: 日期，默认为今天
+            date: 日期
             
         Returns:
-            是否为交易日
+            True if trading day, False otherwise
         """
-        if date is None:
-            date = datetime.date.today()
-        
-        # 1. 检查是否为周末
-        if date.weekday() >= 5:  # 5=Saturday, 6=Sunday
-            return False
-        
-        # 2. 检查是否为法定节假日
-        if self.use_holiday_check:
-            try:
-                # chinese_calendar库：is_workday() = 工作日
-                # 注意：is_workday() 返回True表示工作日，False表示节假日或周末
-                return cc.is_workday(date)
-            except Exception as e:
-                logger.warning(f"Holiday check failed: {e}, assuming trading day")
-                return True
-        
-        # 如果没有chinese_calendar库，只检查周末
-        return True
+        try:
+            # 使用chinesecalendar判断（已考虑节假日调休）
+            return is_workday(date)
+        except Exception as e:
+            logger.warning(f"Failed to check if {date} is workday: {e}, fallback to weekday check")
+            # 降级为简单的工作日判断
+            return date.weekday() < 5  # 周一到周五
     
-    def is_trading_time(self, dt: datetime.datetime = None) -> bool:
+    def is_trading_time(self, dt: datetime.datetime) -> bool:
         """
-        判断是否为交易时间（不含集合竞价）
+        判断是否在交易时间内
         
         Args:
-            dt: 日期时间，默认为现在
+            dt: 日期时间
             
         Returns:
-            是否为交易时间
+            True if in trading hours, False otherwise
         """
-        if dt is None:
-            dt = datetime.datetime.now()
-        
-        # 1. 检查是否为交易日
+        # 首先检查是否为交易日
         if not self.is_trading_day(dt.date()):
             return False
         
-        # 2. 检查时间段
         current_time = dt.time()
         
-        # 早盘：9:30-11:30
-        if self.MORNING_START <= current_time <= self.MORNING_END:
-            return True
+        # 检查是否在上午或下午交易时段
+        in_morning = self.morning_start <= current_time <= self.morning_end
+        in_afternoon = self.afternoon_start <= current_time <= self.afternoon_end
         
-        # 午盘：13:00-15:00
-        if self.AFTERNOON_START <= current_time <= self.AFTERNOON_END:
-            return True
-        
-        return False
+        return in_morning or in_afternoon
     
-    def is_call_auction_time(self, dt: datetime.datetime = None) -> bool:
+    def is_call_auction_time(self, dt: datetime.datetime) -> bool:
         """
-        判断是否为集合竞价时间（9:15-9:25）
+        判断是否在集合竞价时间
         
         Args:
-            dt: 日期时间，默认为现在
+            dt: 日期时间
             
         Returns:
-            是否为集合竞价时间
+            True if in call auction time
         """
-        if dt is None:
-            dt = datetime.datetime.now()
-        
-        # 1. 检查是否为交易日
         if not self.is_trading_day(dt.date()):
             return False
         
-        # 2. 检查时间段
         current_time = dt.time()
-        return self.CALL_AUCTION_START <= current_time <= self.CALL_AUCTION_END
-    
-    def is_market_open(self, dt: datetime.datetime = None) -> bool:
-        """
-        判断市场是否开盘（交易时间或集合竞价时间）
         
-        Args:
-            dt: 日期时间，默认为现在
-            
-        Returns:
-            市场是否开盘
-        """
-        return self.is_trading_time(dt) or self.is_call_auction_time(dt)
+        # 开盘集合竞价
+        in_morning_auction = self.call_auction_start <= current_time <= self.call_auction_end
+        
+        # 尾盘集合竞价
+        in_close_auction = self.close_auction_start <= current_time <= self.close_auction_end
+        
+        return in_morning_auction or in_close_auction
     
-    def get_next_trading_day(self, date: datetime.date = None) -> datetime.date:
+    def get_next_trading_day(self, date: datetime.date) -> datetime.date:
         """
         获取下一个交易日
         
         Args:
-            date: 起始日期，默认为今天
+            date: 当前日期
             
         Returns:
             下一个交易日
         """
-        if date is None:
-            date = datetime.date.today()
+        next_day = date + datetime.timedelta(days=1)
         
-        next_date = date + datetime.timedelta(days=1)
-        max_attempts = 30  # 最多查找30天
+        # 最多查找30天
+        for _ in range(30):
+            if self.is_trading_day(next_day):
+                return next_day
+            next_day += datetime.timedelta(days=1)
         
-        for _ in range(max_attempts):
-            if self.is_trading_day(next_date):
-                return next_date
-            next_date += datetime.timedelta(days=1)
-        
-        # 如果30天内没有交易日（不太可能），返回原日期+1
-        logger.warning(f"No trading day found within 30 days after {date}")
+        # 如果30天内没有交易日，返回原日期+1
+        logger.warning(f"No trading day found within 30 days from {date}")
         return date + datetime.timedelta(days=1)
     
-    def get_trading_seconds_left(self, dt: datetime.datetime = None) -> int:
+    def get_previous_trading_day(self, date: datetime.date) -> datetime.date:
         """
-        获取距离收盘还剩多少秒
+        获取上一个交易日
         
         Args:
-            dt: 日期时间，默认为现在
+            date: 当前日期
             
         Returns:
-            剩余秒数，-1表示非交易时间
+            上一个交易日
         """
-        if dt is None:
-            dt = datetime.datetime.now()
+        prev_day = date - datetime.timedelta(days=1)
         
-        if not self.is_trading_time(dt):
-            return -1
+        # 最多查找30天
+        for _ in range(30):
+            if self.is_trading_day(prev_day):
+                return prev_day
+            prev_day -= datetime.timedelta(days=1)
         
-        current_time = dt.time()
-        
-        # 早盘
-        if self.MORNING_START <= current_time <= self.MORNING_END:
-            end_datetime = datetime.datetime.combine(dt.date(), self.MORNING_END)
-            return int((end_datetime - dt).total_seconds())
-        
-        # 午盘
-        if self.AFTERNOON_START <= current_time <= self.AFTERNOON_END:
-            end_datetime = datetime.datetime.combine(dt.date(), self.AFTERNOON_END)
-            return int((end_datetime - dt).total_seconds())
-        
-        return -1
+        # 如果30天内没有交易日，返回原日期-1
+        logger.warning(f"No trading day found within 30 days before {date}")
+        return date - datetime.timedelta(days=1)
     
-    def wait_until_next_bar(self, freq_seconds: int = 60):
+    def get_trading_days(self, start_date: datetime.date, end_date: datetime.date) -> List[datetime.date]:
         """
-        等待到下一个整点bar（用于实时模式）
+        获取时间范围内的所有交易日
         
         Args:
-            freq_seconds: 频率秒数（60=1分钟，300=5分钟）
-        """
-        import time
-        
-        now = datetime.datetime.now()
-        current_seconds = now.second + now.microsecond / 1000000.0
-        
-        # 计算需要等待的秒数
-        wait_seconds = freq_seconds - (current_seconds % freq_seconds)
-        
-        if wait_seconds > 0:
-            logger.debug(f"Waiting {wait_seconds:.2f}s until next bar")
-            time.sleep(wait_seconds)
-    
-    @staticmethod
-    def get_date_int(dt: datetime.datetime = None) -> int:
-        """
-        获取日期整数（格式：20250203）
-        
-        Args:
-            dt: 日期时间，默认为现在
+            start_date: 开始日期
+            end_date: 结束日期
             
         Returns:
-            日期整数
+            交易日列表
         """
-        if dt is None:
-            dt = datetime.datetime.now()
+        trading_days = []
+        current_date = start_date
         
-        return int(dt.strftime("%Y%m%d"))
+        while current_date <= end_date:
+            if self.is_trading_day(current_date):
+                trading_days.append(current_date)
+            current_date += datetime.timedelta(days=1)
+        
+        return trading_days
     
-    @staticmethod
-    def date_int_to_datetime(date_int: int) -> datetime.datetime:
+    def get_trading_minutes(self, date: datetime.date) -> List[datetime.datetime]:
         """
-        日期整数转datetime
+        获取某一交易日的所有交易分钟时间点
         
         Args:
-            date_int: 日期整数（如20250203）
+            date: 日期
             
         Returns:
-            datetime对象
+            交易分钟时间点列表
         """
-        date_str = str(date_int)
-        return datetime.datetime.strptime(date_str, "%Y%m%d")
+        if not self.is_trading_day(date):
+            return []
+        
+        minutes = []
+        
+        # 上午交易时段（09:30 - 11:30，共120分钟）
+        morning_start = datetime.datetime.combine(date, self.morning_start)
+        for i in range(120):
+            minutes.append(morning_start + datetime.timedelta(minutes=i))
+        
+        # 下午交易时段（13:00 - 15:00，共120分钟）
+        afternoon_start = datetime.datetime.combine(date, self.afternoon_start)
+        for i in range(120):
+            minutes.append(afternoon_start + datetime.timedelta(minutes=i))
+        
+        return minutes
+    
+    def get_market_open_time(self, date: datetime.date) -> datetime.datetime:
+        """
+        获取开盘时间
+        
+        Args:
+            date: 日期
+            
+        Returns:
+            开盘时间
+        """
+        return datetime.datetime.combine(date, self.morning_start)
+    
+    def get_market_close_time(self, date: datetime.date) -> datetime.datetime:
+        """
+        获取收盘时间
+        
+        Args:
+            date: 日期
+            
+        Returns:
+            收盘时间
+        """
+        return datetime.datetime.combine(date, self.afternoon_end)
+    
+    def get_time_until_market_open(self, dt: datetime.datetime) -> Optional[datetime.timedelta]:
+        """
+        获取距离开盘的时间
+        
+        Args:
+            dt: 当前时间
+            
+        Returns:
+            距离开盘的时间间隔，如果已开盘则返回None
+        """
+        if self.is_trading_time(dt):
+            return None
+        
+        # 获取下一个开盘时间
+        if dt.time() < self.morning_start:
+            # 今天还未开盘
+            next_open = datetime.datetime.combine(dt.date(), self.morning_start)
+        elif dt.time() < self.afternoon_start:
+            # 今天上午已结束，等待下午开盘
+            next_open = datetime.datetime.combine(dt.date(), self.afternoon_start)
+        else:
+            # 今天已收盘，等待下一个交易日
+            next_day = self.get_next_trading_day(dt.date())
+            next_open = datetime.datetime.combine(next_day, self.morning_start)
+        
+        return next_open - dt
+    
+    def get_time_until_market_close(self, dt: datetime.datetime) -> Optional[datetime.timedelta]:
+        """
+        获取距离收盘的时间
+        
+        Args:
+            dt: 当前时间
+            
+        Returns:
+            距离收盘的时间间隔，如果已收盘则返回None
+        """
+        if not self.is_trading_day(dt.date()):
+            return None
+        
+        close_time = self.get_market_close_time(dt.date())
+        
+        if dt >= close_time:
+            return None
+        
+        return close_time - dt
 
 
-# 全局实例
-_calendar: Optional[TradingCalendar] = None
+# 全局交易日历实例
+_global_calendar: Optional[TradingCalendar] = None
 
 
 def get_calendar() -> TradingCalendar:
-    """获取全局交易日历实例（单例）"""
-    global _calendar
-    if _calendar is None:
-        _calendar = TradingCalendar()
-    return _calendar
-
-
-if __name__ == "__main__":
-    # 测试代码
-    logging.basicConfig(level=logging.INFO)
+    """
+    获取全局交易日历实例（单例模式）
     
-    print("=" * 60)
-    print("ApexQuant Trading Calendar Test")
-    print("=" * 60)
+    Returns:
+        交易日历实例
+    """
+    global _global_calendar
     
-    calendar = get_calendar()
+    if _global_calendar is None:
+        _global_calendar = TradingCalendar()
     
-    now = datetime.datetime.now()
-    print(f"\nCurrent time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"Is trading day: {calendar.is_trading_day()}")
-    print(f"Is trading time: {calendar.is_trading_time()}")
-    print(f"Is call auction: {calendar.is_call_auction_time()}")
-    print(f"Is market open: {calendar.is_market_open()}")
-    
-    if calendar.is_trading_time():
-        seconds_left = calendar.get_trading_seconds_left()
-        print(f"Trading seconds left: {seconds_left}s ({seconds_left/60:.1f}min)")
-    
-    print(f"\nNext trading day: {calendar.get_next_trading_day()}")
-    print(f"Date int: {calendar.get_date_int()}")
-    
-    # 测试特定时间
-    print("\nTesting specific times:")
-    test_times = [
-        datetime.datetime(2025, 2, 3, 9, 0),   # 开盘前
-        datetime.datetime(2025, 2, 3, 9, 20),  # 集合竞价
-        datetime.datetime(2025, 2, 3, 10, 0),  # 早盘
-        datetime.datetime(2025, 2, 3, 12, 0),  # 午休
-        datetime.datetime(2025, 2, 3, 14, 0),  # 午盘
-        datetime.datetime(2025, 2, 3, 16, 0),  # 收盘后
-    ]
-    
-    for test_time in test_times:
-        is_trading = calendar.is_trading_time(test_time)
-        is_auction = calendar.is_call_auction_time(test_time)
-        status = "TRADING" if is_trading else ("AUCTION" if is_auction else "CLOSED")
-        print(f"  {test_time.strftime('%H:%M')}: {status}")
-    
-    print("\n" + "=" * 60)
-    print("[OK] Trading calendar test passed!")
-    print("=" * 60)
+    return _global_calendar
