@@ -262,6 +262,74 @@ class SmartTradingAdvisor:
                 warnings=["AI分析异常，建议人工判断"]
             )
 
+    def analyze_full(
+        self,
+        symbol: str,
+        price_data,
+        current_price: float,
+        account_info: Dict,
+        news: List[str] = None
+    ) -> AIAnalysisResult:
+        """
+        全面分析（自动获取基本面和资金流向数据）
+
+        Args:
+            symbol: 股票代码
+            price_data: 价格数据
+            current_price: 当前价格
+            account_info: 账户信息
+            news: 新闻列表
+
+        Returns:
+            AIAnalysisResult
+        """
+        # 获取基本面数据
+        fundamental = None
+        try:
+            from apexquant.data.fundamental_fetcher import get_fundamental
+            fund_data = get_fundamental(symbol)
+            fundamental = FundamentalData(
+                pe_ratio=fund_data.pe_ttm,
+                pb_ratio=fund_data.pb,
+                roe=fund_data.roe,
+                revenue_growth=fund_data.revenue_growth,
+                profit_growth=fund_data.profit_growth,
+                debt_ratio=fund_data.debt_ratio,
+                market_cap=fund_data.total_market_cap,
+                circulating_cap=fund_data.circulating_market_cap,
+                industry=fund_data.industry
+            )
+            logger.info(f"获取基本面数据成功: PE={fund_data.pe_ttm:.1f}, ROE={fund_data.roe:.1f}%")
+        except Exception as e:
+            logger.warning(f"获取基本面数据失败: {e}")
+
+        # 获取资金流向数据
+        market_context = None
+        try:
+            from apexquant.data.capital_flow import get_stock_capital_flow, get_north_flow
+            flow = get_stock_capital_flow(symbol)
+            north = get_north_flow()
+
+            market_context = MarketContext(
+                north_flow=north.total_net_inflow,
+                main_flow=flow.main_net_inflow,
+                market_sentiment=flow.get_signal()
+            )
+            logger.info(f"获取资金流向成功: 主力{flow.main_net_inflow:+.2f}亿, 北向{north.total_net_inflow:+.2f}亿")
+        except Exception as e:
+            logger.warning(f"获取资金流向失败: {e}")
+
+        # 调用完整分析
+        return self.analyze(
+            symbol=symbol,
+            price_data=price_data,
+            current_price=current_price,
+            account_info=account_info,
+            fundamental=fundamental,
+            market_context=market_context,
+            news=news
+        )
+
     def _build_analysis_prompt(
         self,
         symbol: str,
