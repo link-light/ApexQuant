@@ -5,11 +5,27 @@
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional, Tuple
-import xgboost as xgb
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, precision_score, recall_score
 import pickle
 from pathlib import Path
+import logging
+
+logger = logging.getLogger(__name__)
+
+# 可选导入
+try:
+    import xgboost as xgb
+    XGBOOST_AVAILABLE = True
+except ImportError:
+    XGBOOST_AVAILABLE = False
+    logger.warning("xgboost not available")
+
+try:
+    from sklearn.model_selection import train_test_split
+    from sklearn.metrics import accuracy_score, precision_score, recall_score
+    SKLEARN_AVAILABLE = True
+except ImportError:
+    SKLEARN_AVAILABLE = False
+    logger.warning("sklearn not available")
 
 
 class MultiFactorModel:
@@ -63,25 +79,32 @@ class MultiFactorModel:
         return X, y
     
     def train(self, X: pd.DataFrame, y: pd.Series,
-             test_size: float = 0.2, 
+             test_size: float = 0.2,
              params: Optional[Dict] = None) -> Dict:
         """
         训练模型
-        
+
         Args:
             X: 特征
             y: 目标
             test_size: 测试集比例
             params: XGBoost 参数
-        
+
         Returns:
             训练结果字典
         """
+        if not XGBOOST_AVAILABLE or not SKLEARN_AVAILABLE:
+            return {
+                'error': 'xgboost or sklearn not available',
+                'train_accuracy': 0,
+                'test_accuracy': 0
+            }
+
         # 划分训练集和测试集
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=test_size, random_state=42, shuffle=False
         )
-        
+
         # 默认参数
         if params is None:
             params = {
@@ -93,7 +116,7 @@ class MultiFactorModel:
                 'colsample_bytree': 0.8,
                 'random_state': 42
             }
-        
+
         # 训练模型
         self.model = xgb.XGBClassifier(**params)
         self.model.fit(
