@@ -16,10 +16,8 @@ from .trading_calendar import TradingCalendar, get_calendar
 
 # 数据源
 from .data_source import (
-    DataSource,
-    MultiSourceAdapter,
+    SimulationDataSource,
     MockDataSource,
-    create_data_source,
     bar_to_tick
 )
 
@@ -55,10 +53,8 @@ __all__ = [
     'get_calendar',
     
     # 数据源
-    'DataSource',
-    'MultiSourceAdapter',
+    'SimulationDataSource',
     'MockDataSource',
-    'create_data_source',
     'bar_to_tick',
     
     # 风控和分析

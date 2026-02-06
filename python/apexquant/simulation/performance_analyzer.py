@@ -359,3 +359,273 @@ class PerformanceAnalyzer:
             logger.warning("matplotlib not available, cannot plot equity curve")
         except Exception as e:
             logger.error(f"Failed to plot equity curve: {e}")
+    
+    def plot_drawdown(self, equity_curve: pd.DataFrame, save_path: Optional[str] = None):
+        """
+        绘制回撤分析图
+        
+        Args:
+            equity_curve: 权益曲线 DataFrame
+            save_path: 保存路径（可选）
+        """
+        try:
+            import matplotlib.pyplot as plt
+            import matplotlib.dates as mdates
+            
+            if equity_curve is None or equity_curve.empty:
+                logger.warning("Empty equity curve, cannot plot drawdown")
+                return
+            
+            # 计算回撤
+            equity = equity_curve['equity'].values
+            peak = np.maximum.accumulate(equity)
+            drawdown = (equity - peak) / peak
+            
+            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
+            
+            # 上图：权益曲线和峰值
+            if 'date' in equity_curve.columns:
+                dates = equity_curve['date']
+                ax1.plot(dates, equity, label='Equity', linewidth=2)
+                ax1.plot(dates, peak, label='Peak', linestyle='--', alpha=0.7)
+                ax1.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+            else:
+                ax1.plot(equity, label='Equity', linewidth=2)
+                ax1.plot(peak, label='Peak', linestyle='--', alpha=0.7)
+            
+            ax1.set_ylabel('Equity')
+            ax1.set_title('Equity and Peak')
+            ax1.legend()
+            ax1.grid(True, alpha=0.3)
+            
+            # 下图：回撤
+            if 'date' in equity_curve.columns:
+                ax2.fill_between(dates, drawdown, 0, alpha=0.3, color='red')
+                ax2.plot(dates, drawdown, color='red', linewidth=1)
+            else:
+                ax2.fill_between(range(len(drawdown)), drawdown, 0, alpha=0.3, color='red')
+                ax2.plot(drawdown, color='red', linewidth=1)
+            
+            ax2.set_xlabel('Date/Time')
+            ax2.set_ylabel('Drawdown')
+            ax2.set_title('Drawdown Analysis')
+            ax2.grid(True, alpha=0.3)
+            ax2.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f'{y:.1%}'))
+            
+            plt.xticks(rotation=45)
+            plt.tight_layout()
+            
+            if save_path:
+                plt.savefig(save_path, dpi=150)
+                logger.info(f"Drawdown chart saved to {save_path}")
+            else:
+                plt.show()
+                
+        except ImportError:
+            logger.warning("matplotlib not available, cannot plot drawdown")
+        except Exception as e:
+            logger.error(f"Failed to plot drawdown: {e}")
+    
+    def plot_trade_analysis(self, trades: List[Dict], save_path: Optional[str] = None):
+        """
+        绘制交易分析图
+        
+        Args:
+            trades: 交易记录列表
+            save_path: 保存路径（可选）
+        """
+        try:
+            import matplotlib.pyplot as plt
+            
+            if not trades:
+                logger.warning("No trades to plot")
+                return
+            
+            # 准备数据
+            profits = []
+            dates = []
+            cumulative_profit = []
+            cum_sum = 0
+            
+            for trade in trades:
+                profit = trade.get('profit', 0)
+                profits.append(profit)
+                dates.append(trade.get('sell_date', ''))
+                cum_sum += profit
+                cumulative_profit.append(cum_sum)
+            
+            fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(14, 10))
+            
+            # 1. 单笔盈亏分布
+            colors = ['green' if p > 0 else 'red' for p in profits]
+            ax1.bar(range(len(profits)), profits, color=colors, alpha=0.6)
+            ax1.axhline(y=0, color='black', linestyle='-', linewidth=0.5)
+            ax1.set_xlabel('Trade Number')
+            ax1.set_ylabel('Profit/Loss')
+            ax1.set_title('Individual Trade P&L')
+            ax1.grid(True, alpha=0.3)
+            
+            # 2. 累计盈亏曲线
+            ax2.plot(cumulative_profit, linewidth=2, color='blue')
+            ax2.axhline(y=0, color='black', linestyle='--', linewidth=0.5)
+            ax2.set_xlabel('Trade Number')
+            ax2.set_ylabel('Cumulative Profit/Loss')
+            ax2.set_title('Cumulative P&L')
+            ax2.grid(True, alpha=0.3)
+            
+            # 3. 盈亏分布直方图
+            ax3.hist(profits, bins=20, alpha=0.7, color='blue', edgecolor='black')
+            ax3.axvline(x=0, color='red', linestyle='--', linewidth=2)
+            ax3.set_xlabel('Profit/Loss')
+            ax3.set_ylabel('Frequency')
+            ax3.set_title('P&L Distribution')
+            ax3.grid(True, alpha=0.3)
+            
+            # 4. 盈亏统计饼图
+            winning_trades = sum(1 for p in profits if p > 0)
+            losing_trades = sum(1 for p in profits if p < 0)
+            breakeven_trades = sum(1 for p in profits if p == 0)
+            
+            labels = []
+            sizes = []
+            colors_pie = []
+            
+            if winning_trades > 0:
+                labels.append(f'Winning ({winning_trades})')
+                sizes.append(winning_trades)
+                colors_pie.append('green')
+            if losing_trades > 0:
+                labels.append(f'Losing ({losing_trades})')
+                sizes.append(losing_trades)
+                colors_pie.append('red')
+            if breakeven_trades > 0:
+                labels.append(f'Breakeven ({breakeven_trades})')
+                sizes.append(breakeven_trades)
+                colors_pie.append('gray')
+            
+            if sizes:
+                ax4.pie(sizes, labels=labels, colors=colors_pie, autopct='%1.1f%%', startangle=90)
+                ax4.set_title('Trade Outcome Distribution')
+            
+            plt.tight_layout()
+            
+            if save_path:
+                plt.savefig(save_path, dpi=150)
+                logger.info(f"Trade analysis chart saved to {save_path}")
+            else:
+                plt.show()
+                
+        except ImportError:
+            logger.warning("matplotlib not available, cannot plot trade analysis")
+        except Exception as e:
+            logger.error(f"Failed to plot trade analysis: {e}")
+    
+    def plot_monthly_returns(self, equity_curve: pd.DataFrame, save_path: Optional[str] = None):
+        """
+        绘制月度收益热力图
+        
+        Args:
+            equity_curve: 权益曲线 DataFrame
+            save_path: 保存路径（可选）
+        """
+        try:
+            import matplotlib.pyplot as plt
+            
+            if equity_curve is None or equity_curve.empty or 'date' not in equity_curve.columns:
+                logger.warning("Invalid equity curve for monthly returns")
+                return
+            
+            # 转换为datetime
+            df = equity_curve.copy()
+            df['date'] = pd.to_datetime(df['date'])
+            df = df.set_index('date')
+            
+            # 计算日收益率
+            df['returns'] = df['equity'].pct_change()
+            
+            # 按月汇总
+            monthly_returns = df['returns'].resample('M').apply(lambda x: (1 + x).prod() - 1)
+            
+            if monthly_returns.empty:
+                logger.warning("No monthly returns to plot")
+                return
+            
+            # 创建年月矩阵
+            monthly_returns_df = monthly_returns.to_frame()
+            monthly_returns_df['year'] = monthly_returns_df.index.year
+            monthly_returns_df['month'] = monthly_returns_df.index.month
+            
+            pivot_table = monthly_returns_df.pivot_table(
+                values='returns',
+                index='year',
+                columns='month',
+                aggfunc='first'
+            )
+            
+            # 绘制热力图
+            fig, ax = plt.subplots(figsize=(12, max(4, len(pivot_table) * 0.5)))
+            
+            im = ax.imshow(pivot_table.values, cmap='RdYlGn', aspect='auto', vmin=-0.1, vmax=0.1)
+            
+            # 设置刻度
+            ax.set_xticks(range(12))
+            ax.set_xticklabels(['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                               'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'])
+            ax.set_yticks(range(len(pivot_table)))
+            ax.set_yticklabels(pivot_table.index)
+            
+            # 添加数值标签
+            for i in range(len(pivot_table)):
+                for j in range(12):
+                    value = pivot_table.iloc[i, j]
+                    if not np.isnan(value):
+                        text = ax.text(j, i, f'{value:.1%}',
+                                     ha="center", va="center", color="black", fontsize=8)
+            
+            ax.set_title('Monthly Returns Heatmap')
+            ax.set_xlabel('Month')
+            ax.set_ylabel('Year')
+            
+            # 添加颜色条
+            cbar = plt.colorbar(im, ax=ax)
+            cbar.set_label('Returns', rotation=270, labelpad=15)
+            
+            plt.tight_layout()
+            
+            if save_path:
+                plt.savefig(save_path, dpi=150)
+                logger.info(f"Monthly returns chart saved to {save_path}")
+            else:
+                plt.show()
+                
+        except ImportError:
+            logger.warning("matplotlib not available, cannot plot monthly returns")
+        except Exception as e:
+            logger.error(f"Failed to plot monthly returns: {e}")
+    
+    def generate_all_charts(self, output_dir: str = "reports"):
+        """
+        生成所有图表
+        
+        Args:
+            output_dir: 输出目录
+        """
+        import os
+        os.makedirs(output_dir, exist_ok=True)
+        
+        logger.info("Generating all performance charts...")
+        
+        # 加载数据
+        equity_curve = self.load_equity_curve()
+        trades = self.load_trades()
+        
+        # 生成各类图表
+        if equity_curve is not None and not equity_curve.empty:
+            self.plot_equity_curve(equity_curve, os.path.join(output_dir, "equity_curve.png"))
+            self.plot_drawdown(equity_curve, os.path.join(output_dir, "drawdown.png"))
+            self.plot_monthly_returns(equity_curve, os.path.join(output_dir, "monthly_returns.png"))
+        
+        if trades:
+            self.plot_trade_analysis(trades, os.path.join(output_dir, "trade_analysis.png"))
+        
+        logger.info(f"All charts saved to {output_dir}")

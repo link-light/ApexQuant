@@ -263,3 +263,163 @@ def create_data_source(config: dict) -> SimulationDataSource:
     backup = config.get("backup", "akshare")
     
     return SimulationDataSource(primary_source=primary, backup_source=backup)
+
+
+class MockDataSource:
+    """Mock数据源，用于测试"""
+    
+    def __init__(self, num_days: int = 100, initial_price: float = 100.0):
+        """
+        初始化Mock数据源
+        
+        Args:
+            num_days: 生成数据天数
+            initial_price: 初始价格
+        """
+        self.num_days = num_days
+        self.initial_price = initial_price
+        logger.info(f"MockDataSource initialized: {num_days} days, initial_price={initial_price}")
+    
+    def get_stock_data(
+        self,
+        symbol: str,
+        start_date: str,
+        end_date: str,
+        freq: str = "d"
+    ) -> Optional[pd.DataFrame]:
+        """
+        生成随机游走数据
+        
+        Args:
+            symbol: 股票代码
+            start_date: 开始日期
+            end_date: 结束日期
+            freq: 频率
+            
+        Returns:
+            DataFrame with columns: date, open, high, low, close, volume
+        """
+        import numpy as np
+        
+        try:
+            # 生成日期序列
+            start = pd.to_datetime(start_date)
+            end = pd.to_datetime(end_date)
+            dates = pd.date_range(start, end, freq='D')
+            
+            # 限制数量
+            if len(dates) > self.num_days:
+                dates = dates[:self.num_days]
+            
+            # 生成随机游走价格
+            np.random.seed(42)  # 固定种子以便测试
+            returns = np.random.normal(0.001, 0.02, len(dates))  # 日均收益0.1%，波动2%
+            prices = self.initial_price * np.cumprod(1 + returns)
+            
+            # 生成OHLC数据
+            data = []
+            for i, (date, close) in enumerate(zip(dates, prices)):
+                # 生成开高低收
+                daily_volatility = close * 0.02  # 2%日内波动
+                open_price = close * (1 + np.random.normal(0, 0.005))
+                high = max(open_price, close) * (1 + abs(np.random.normal(0, 0.01)))
+                low = min(open_price, close) * (1 - abs(np.random.normal(0, 0.01)))
+                
+                # 生成成交量
+                volume = np.random.randint(1000000, 10000000)
+                
+                data.append({
+                    'date': date.strftime('%Y-%m-%d'),
+                    'open': round(open_price, 2),
+                    'high': round(high, 2),
+                    'low': round(low, 2),
+                    'close': round(close, 2),
+                    'volume': volume
+                })
+            
+            df = pd.DataFrame(data)
+            logger.debug(f"Generated {len(df)} mock data rows for {symbol}")
+            return df
+            
+        except Exception as e:
+            logger.error(f"Failed to generate mock data: {e}")
+            return None
+    
+    def get_realtime_quotes(self, symbols: List[str]) -> Optional[pd.DataFrame]:
+        """获取实时行情（Mock）"""
+        import numpy as np
+        
+        data = []
+        for symbol in symbols:
+            price = self.initial_price * (1 + np.random.normal(0, 0.01))
+            data.append({
+                'symbol': symbol,
+                'current': round(price, 2),
+                'price': round(price, 2)
+            })
+        
+        return pd.DataFrame(data)
+    
+    def get_latest_price(self, symbol: str) -> Optional[float]:
+        """获取最新价格（Mock）"""
+        import numpy as np
+        return self.initial_price * (1 + np.random.normal(0, 0.01))
+
+
+def bar_to_tick(bar: pd.Series, num_ticks: int = 10) -> List[dict]:
+    """
+    将K线数据转换为Tick数据
+    
+    Args:
+        bar: K线数据（Series），包含 open, high, low, close, volume
+        num_ticks: 生成的tick数量
+        
+    Returns:
+        Tick数据列表，每个tick包含 price, volume, timestamp
+    """
+    import numpy as np
+    
+    try:
+        open_price = float(bar['open'])
+        high = float(bar['high'])
+        low = float(bar['low'])
+        close = float(bar['close'])
+        volume = int(bar['volume'])
+        
+        # 生成价格序列：open -> high/low -> close
+        prices = []
+        
+        # 开盘价
+        prices.append(open_price)
+        
+        # 中间价格在high和low之间随机游走
+        for i in range(num_ticks - 2):
+            # 随机在high和low之间
+            price = low + (high - low) * np.random.random()
+            prices.append(price)
+        
+        # 收盘价
+        prices.append(close)
+        
+        # 分配成交量
+        volumes = np.random.dirichlet(np.ones(num_ticks)) * volume
+        volumes = volumes.astype(int)
+        
+        # 生成时间戳（假设在一分钟内均匀分布）
+        base_time = datetime.datetime.now()
+        timestamps = [base_time + datetime.timedelta(seconds=i*6) for i in range(num_ticks)]
+        
+        # 组装tick数据
+        ticks = []
+        for price, vol, ts in zip(prices, volumes, timestamps):
+            ticks.append({
+                'price': round(price, 2),
+                'volume': int(vol),
+                'timestamp': ts.strftime('%Y-%m-%d %H:%M:%S')
+            })
+        
+        return ticks
+        
+    except Exception as e:
+        logger.error(f"Failed to convert bar to ticks: {e}")
+        return []

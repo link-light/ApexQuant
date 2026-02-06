@@ -7,16 +7,24 @@ import sys
 from pathlib import Path
 import datetime
 import logging
-from typing import Optional, List, Dict, Callable
+from typing import Optional, List, Dict, Callable, Any, TYPE_CHECKING
 import pandas as pd
 
 # 导入C++模块
-try:
+if TYPE_CHECKING:
     import apexquant_simulation as sim_cpp
     import apexquant_core as core_cpp
-except ImportError as e:
-    logging.error(f"Failed to import C++ modules: {e}")
-    sys.exit(1)
+else:
+    try:
+        import apexquant_simulation as sim_cpp
+        import apexquant_core as core_cpp
+        CPP_AVAILABLE = True
+    except ImportError as e:
+        print(f"警告: C++ 核心模块未加载: {e}")
+        print("某些功能可能不可用。请确保已编译C++模块。")
+        CPP_AVAILABLE = False
+        sim_cpp = None  # type: ignore
+        core_cpp = None  # type: ignore
 
 # 导入Python模块
 from .database import DatabaseManager
@@ -554,7 +562,7 @@ class SimulationController:
             for pos in positions
         }
     
-    def _save_order_to_db(self, order: sim_cpp.SimulatedOrder) -> None:
+    def _save_order_to_db(self, order: Any) -> None:
         """保存订单到数据库"""
         try:
             self.database.save_order(
@@ -570,7 +578,7 @@ class SimulationController:
         except Exception as e:
             logger.error(f"Failed to save order to db: {e}")
     
-    def _cpp_order_to_dict(self, order: sim_cpp.SimulatedOrder) -> dict:
+    def _cpp_order_to_dict(self, order: Any) -> dict:
         """将C++订单转为字典"""
         return {
             "order_id": order.order_id,
