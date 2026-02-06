@@ -42,6 +42,9 @@ data/
 logs/
 *.log
 
+# 生成的报告
+reports/
+
 # 配置文件（可能包含敏感信息）
 config/local_*.json
 config/secrets.json
