@@ -14,28 +14,37 @@ import logging
 try:
     from apexquant.data.multi_source import MultiSourceDataFetcher
 except ImportError:
-    # 如果导入失败，添加路径重试
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    from apexquant.data.multi_source import MultiSourceDataFetcher
+    try:
+        # 如果导入失败，添加路径重试
+        sys.path.insert(0, str(Path(__file__).parent.parent))
+        from data.multi_source import MultiSourceDataFetcher
+    except ImportError:
+        # 最后尝试使用简化版本
+        MultiSourceDataFetcher = None
 
 logger = logging.getLogger(__name__)
 
 
 class SimulationDataSource:
     """模拟盘数据源适配器"""
-    
+
     def __init__(self, primary_source: str = "baostock", backup_source: str = "akshare"):
         """
         初始化数据源
-        
+
         Args:
             primary_source: 主数据源
             backup_source: 备用数据源
         """
-        self.fetcher = MultiSourceDataFetcher(
-            primary_source=primary_source,
-            backup_source=backup_source
-        )
+        self.primary_source = primary_source
+        self.backup_source = backup_source
+
+        if MultiSourceDataFetcher is not None:
+            self.fetcher = MultiSourceDataFetcher()
+        else:
+            self.fetcher = None
+            logger.warning("MultiSourceDataFetcher not available, using mock data")
+
         logger.info(f"Data source initialized: primary={primary_source}, backup={backup_source}")
     
     def get_stock_data(
@@ -252,14 +261,111 @@ class SimulationDataSource:
 def create_data_source(config: dict) -> SimulationDataSource:
     """
     创建数据源实例
-    
+
     Args:
         config: 配置字典
-        
+
     Returns:
         数据源实例
     """
     primary = config.get("primary", "baostock")
     backup = config.get("backup", "akshare")
-    
+
     return SimulationDataSource(primary_source=primary, backup_source=backup)
+
+
+# 别名，兼容旧代码
+DataSource = SimulationDataSource
+MultiSourceAdapter = SimulationDataSource
+
+
+class MockDataSource:
+    """Mock数据源，用于测试"""
+
+    def __init__(self, base_price: float = 10.0, volatility: float = 0.02):
+        self.base_price = base_price
+        self.volatility = volatility
+        self._price = base_price
+        import random
+        self.random = random
+
+    def get_stock_data(self, symbol: str, start_date: str, end_date: str, freq: str = "d") -> pd.DataFrame:
+        """生成Mock历史数据"""
+        import numpy as np
+
+        dates = pd.date_range(start=start_date, end=end_date, freq='B')
+        n = len(dates)
+
+        if n == 0:
+            return pd.DataFrame()
+
+        # 生成随机价格
+        returns = np.random.normal(0.0005, self.volatility, n)
+        prices = self.base_price * np.exp(np.cumsum(returns))
+
+        # 生成OHLCV
+        data = {
+            'date': dates,
+            'open': prices * (1 + np.random.uniform(-0.01, 0.01, n)),
+            'high': prices * (1 + np.random.uniform(0, 0.02, n)),
+            'low': prices * (1 - np.random.uniform(0, 0.02, n)),
+            'close': prices,
+            'volume': np.random.randint(100000, 1000000, n),
+        }
+
+        df = pd.DataFrame(data)
+        return df
+
+    def get_realtime_quotes(self, symbols: List[str]) -> pd.DataFrame:
+        """生成Mock实时行情"""
+        data = []
+        for symbol in symbols:
+            change = self.random.uniform(-0.05, 0.05)
+            price = self._price * (1 + change)
+            data.append({
+                'symbol': symbol,
+                'price': price,
+                'change_pct': change * 100,
+                'volume': self.random.randint(100000, 1000000),
+            })
+        return pd.DataFrame(data)
+
+    def get_latest_price(self, symbol: str) -> float:
+        """获取Mock最新价格"""
+        change = self.random.uniform(-0.02, 0.02)
+        self._price = self._price * (1 + change)
+        return self._price
+
+
+def bar_to_tick(bar: dict, symbol: str, timestamp: int = None) -> dict:
+    """
+    将K线数据转换为Tick数据
+
+    Args:
+        bar: K线数据字典，包含 open, high, low, close, volume
+        symbol: 股票代码
+        timestamp: 时间戳（毫秒），默认当前时间
+
+    Returns:
+        Tick数据字典
+    """
+    import time
+
+    if timestamp is None:
+        timestamp = int(time.time() * 1000)
+
+    return {
+        'symbol': symbol,
+        'timestamp': timestamp,
+        'last_price': bar.get('close', 0.0),
+        'open': bar.get('open', 0.0),
+        'high': bar.get('high', 0.0),
+        'low': bar.get('low', 0.0),
+        'close': bar.get('close', 0.0),
+        'volume': bar.get('volume', 0),
+        'amount': bar.get('amount', 0.0),
+        'bid_price': bar.get('close', 0.0) * 0.999,
+        'ask_price': bar.get('close', 0.0) * 1.001,
+        'bid_volume': 10000,
+        'ask_volume': 10000,
+    }
