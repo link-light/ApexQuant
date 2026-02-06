@@ -65,11 +65,22 @@ class SimulationController:
         self.account_id = account_config.get("account_id", "simulation_001")
         self.initial_capital = account_config.get("initial_capital", 100000.0)
         
-        # 初始化C++模拟交易所
-        self.exchange = sim_cpp.SimulatedExchange(
-            self.account_id,
-            self.initial_capital
-        )
+        # 初始化模拟交易所
+        if CPP_AVAILABLE and sim_cpp is not None:
+            self.exchange = sim_cpp.SimulatedExchange(
+                self.account_id,
+                self.initial_capital
+            )
+            self.use_cpp = True
+        else:
+            # 使用纯Python Mock交易所
+            from .mock_exchange import MockExchange
+            self.exchange = MockExchange(
+                self.account_id,
+                self.initial_capital
+            )
+            self.use_cpp = False
+            logger.warning("使用纯Python模拟交易所（C++模块未加载）")
         
         # 配置手续费率等参数
         commission_rate = account_config.get("commission_rate", 0.00025)
