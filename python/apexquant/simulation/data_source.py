@@ -15,9 +15,13 @@ import logging
 try:
     from apexquant.data.multi_source import MultiSourceDataFetcher
 except ImportError:
-    # 如果导入失败，添加路径重试
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    from apexquant.data.multi_source import MultiSourceDataFetcher
+    try:
+        # 如果导入失败，尝试相对导入
+        sys.path.insert(0, str(Path(__file__).parent.parent))
+        from data.multi_source import MultiSourceDataFetcher
+    except ImportError:
+        # 最后创建一个简单的占位符
+        MultiSourceDataFetcher = None
 
 logger = logging.getLogger(__name__)
 
@@ -33,10 +37,14 @@ class SimulationDataSource:
             primary_source: 主数据源
             backup_source: 备用数据源
         """
-        self.fetcher = MultiSourceDataFetcher(
-            primary_source=primary_source,
-            backup_source=backup_source
-        )
+        self.primary_source = primary_source
+        self.backup_source = backup_source
+
+        if MultiSourceDataFetcher is not None:
+            self.fetcher = MultiSourceDataFetcher()
+        else:
+            self.fetcher = None
+            logger.warning("MultiSourceDataFetcher not available")
         
         # 添加线程锁保证并发安全
         self._lock = threading.RLock()
