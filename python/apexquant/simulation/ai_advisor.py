@@ -6,11 +6,19 @@ ApexQuant AI交易顾问
 
 import json
 import logging
+import os
 import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+# 尝试导入环境变量支持
+try:
+    from dotenv import load_dotenv
+    load_dotenv()  # 加载.env文件
+except ImportError:
+    logger.debug("python-dotenv not installed, using system environment variables only")
 
 # 尝试导入OpenAI库（DeepSeek API兼容）
 try:
@@ -41,8 +49,8 @@ class AITradingAdvisor:
         config = get_config(config_path)
         ai_config = config.get_ai_config()
         
-        # API配置
-        self.api_key = ai_config.get('api_key')
+        # API配置 - 优先使用环境变量
+        self.api_key = os.getenv('DEEPSEEK_API_KEY') or ai_config.get('api_key')
         self.model = ai_config.get('model', 'deepseek-chat')
         self.base_url = ai_config.get('base_url', 'https://api.deepseek.com')
         self.timeout = ai_config.get('timeout', 10)
@@ -67,7 +75,10 @@ class AITradingAdvisor:
             )
             logger.info(f"AI advisor initialized with model: {self.model}")
         else:
-            logger.warning("API key not found, AI advisor disabled")
+            logger.warning(
+                "API key not found. Please set DEEPSEEK_API_KEY environment variable "
+                "or configure api_key in simulation_config.yaml. AI advisor disabled."
+            )
             self.client = None
     
     def should_call_ai(self, current_time: datetime = None) -> bool:

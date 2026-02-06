@@ -8,31 +8,46 @@ ApexQuant 模拟盘数据库管理模块
 import sqlite3
 import time
 import logging
+import shutil
+from pathlib import Path
+from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Tuple
 from contextlib import contextmanager
 import os
 
 logger = logging.getLogger(__name__)
 
+# 导入备份功能
+from .database_backup import DatabaseBackupMixin
 
-class DatabaseManager:
+
+class DatabaseManager(DatabaseBackupMixin):
     """数据库管理器"""
     
-    def __init__(self, db_path: str = "data/sim_trader.db"):
+    def __init__(self, db_path: str = "data/sim_trader.db", auto_backup: bool = True):
         """
         初始化数据库管理器
         
         Args:
             db_path: 数据库文件路径
+            auto_backup: 是否启动时自动备份
         """
-        self.db_path = db_path
+        self.db_path = Path(db_path)
         self.conn: Optional[sqlite3.Connection] = None
         
-        # 确保目录存在
-        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        # 备份目录
+        self.backup_dir = self.db_path.parent / 'backups'
+        self.backup_dir.mkdir(exist_ok=True)
+        
+        # 确保数据库目录存在
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
         
         # 初始化数据库
         self.init_database()
+        
+        # 启动时自动备份
+        if auto_backup:
+            self.auto_backup_on_start()
         
     def init_database(self):
         """初始化数据库，创建所有表"""
