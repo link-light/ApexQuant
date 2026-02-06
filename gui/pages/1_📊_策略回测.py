@@ -131,11 +131,9 @@ with col2:
                     create_rsi_strategy,
                     create_buy_hold_strategy
                 )
-                from apexquant.simulation import PerformanceAnalyzer
-                
                 # 创建控制器
                 controller = SimulationController()
-                
+
                 # 选择策略
                 if strategy == "均线交叉 (MA Cross)":
                     strategy_func = create_ma_cross_strategy(
@@ -145,7 +143,7 @@ with col2:
                     strategy_func = create_rsi_strategy()
                 else:
                     strategy_func = create_buy_hold_strategy()
-                
+
                 # 运行回测
                 symbols = symbols_input.strip().split('\n')
                 controller.start_backtest(
@@ -155,15 +153,32 @@ with col2:
                     strategy_func=strategy_func,
                     bar_interval=bar_interval
                 )
-                
-                # 获取性能分析
-                analyzer = PerformanceAnalyzer(controller.db, controller.account_id)
-                metrics = analyzer.calculate_performance_metrics()
-                
+
+                # 获取回测结果
+                account_info = controller.get_account_info()
+                positions = controller.get_positions()
+                trades = controller.get_trade_history()
+
+                # 计算指标
+                total_assets = account_info.get('total_assets', controller.initial_capital)
+                total_return = (total_assets - controller.initial_capital) / controller.initial_capital * 100
+
+                metrics = {
+                    'total_return_pct': total_return,
+                    'annual_return_pct': total_return * 12,  # 简化计算
+                    'max_drawdown_pct': 0.0,  # TODO: 从权益曲线计算
+                    'sharpe_ratio': 0.0,
+                    'total_trades': len(trades),
+                    'win_rate': 0.0,
+                    'total_assets': total_assets,
+                    'available_cash': account_info.get('available_cash', 0),
+                    'positions': positions,
+                    'trades': trades
+                }
+
                 # 保存结果到session state
                 st.session_state['backtest_result'] = {
                     'metrics': metrics,
-                    'analyzer': analyzer,
                     'controller': controller
                 }
                 
