@@ -30,14 +30,32 @@ MatchResult OrderMatcher::try_match_order(
     const Tick& current_tick,
     bool check_price_limit
 ) {
-    // 1. 检查订单数量有效性（100股整数倍等）
-    auto [is_valid, error_msg] = validate_order_volume(order.volume, order.side);
-    if (!is_valid) {
-        return MatchResult(error_msg);
-    }
-    
-    // 2. 确定基准价格
-    double base_price = 0.0;
+    try {
+        // 0. 输入验证
+        if (order.volume <= 0) {
+            return MatchResult("Invalid order volume: must be positive");
+        }
+        
+        if (order.volume > 1000000000) {  // 10亿股上限
+            return MatchResult("Invalid order volume: exceeds maximum limit");
+        }
+        
+        if (current_tick.last_price <= 0.0) {
+            return MatchResult("Invalid tick price: must be positive");
+        }
+        
+        if (order.type == OrderType::LIMIT && order.price <= 0.0) {
+            return MatchResult("Invalid limit price: must be positive");
+        }
+        
+        // 1. 检查订单数量有效性（100股整数倍等）
+        auto [is_valid, error_msg] = validate_order_volume(order.volume, order.side);
+        if (!is_valid) {
+            return MatchResult(error_msg);
+        }
+        
+        // 2. 确定基准价格
+        double base_price = 0.0;
     
     if (order.type == OrderType::MARKET) {
         // 市价单：买入按ask价，卖出按bid价
@@ -90,8 +108,18 @@ MatchResult OrderMatcher::try_match_order(
         slippage_rate
     );
     
-    // 6. 返回成交结果
-    return MatchResult(filled_price, order.volume);
+        // 6. 返回成交结果
+        return MatchResult(filled_price, order.volume);
+        
+    } catch (const std::exception& e) {
+        // 捕获所有标准异常
+        std::string error_msg = "Order matching error: ";
+        error_msg += e.what();
+        return MatchResult(error_msg);
+    } catch (...) {
+        // 捕获所有其他异常
+        return MatchResult("Unknown error during order matching");
+    }
 }
 
 bool OrderMatcher::check_limit_price(

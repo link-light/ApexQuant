@@ -101,8 +101,21 @@ bool SimulationAccount::add_position(
 ) {
     std::lock_guard<std::mutex> lock(mutex_);
     
+    // 输入验证
+    if (symbol.empty()) {
+        return false;  // 股票代码不能为空
+    }
+    
     if (volume <= 0 || price <= 0) {
-        return false;
+        return false;  // 数量和价格必须为正
+    }
+    
+    if (volume > 1000000000) {  // 10亿股上限
+        return false;  // 数量超过合理范围
+    }
+    
+    if (price > 1000000.0) {  // 100万元/股上限
+        return false;  // 价格超过合理范围
     }
     
     price = round_to_cent(price);
