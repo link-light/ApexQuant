@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 import pandas as pd
 import datetime
+import threading
 from typing import Optional, List
 import logging
 
@@ -14,37 +15,36 @@ import logging
 try:
     from apexquant.data.multi_source import MultiSourceDataFetcher
 except ImportError:
-    try:
-        # 如果导入失败，添加路径重试
-        sys.path.insert(0, str(Path(__file__).parent.parent))
-        from data.multi_source import MultiSourceDataFetcher
-    except ImportError:
-        # 最后尝试使用简化版本
-        MultiSourceDataFetcher = None
+    # 如果导入失败，添加路径重试
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from apexquant.data.multi_source import MultiSourceDataFetcher
 
 logger = logging.getLogger(__name__)
 
 
 class SimulationDataSource:
-    """模拟盘数据源适配器"""
-
+    """模拟盘数据源适配器（线程安全）"""
+    
     def __init__(self, primary_source: str = "baostock", backup_source: str = "akshare"):
         """
         初始化数据源
-
+        
         Args:
             primary_source: 主数据源
             backup_source: 备用数据源
         """
-        self.primary_source = primary_source
-        self.backup_source = backup_source
-
-        if MultiSourceDataFetcher is not None:
-            self.fetcher = MultiSourceDataFetcher()
-        else:
-            self.fetcher = None
-            logger.warning("MultiSourceDataFetcher not available, using mock data")
-
+        self.fetcher = MultiSourceDataFetcher(
+            primary_source=primary_source,
+            backup_source=backup_source
+        )
+        
+        # 添加线程锁保证并发安全
+        self._lock = threading.RLock()
+        
+        # 缓存，避免重复请求
+        self._cache = {}
+        self._cache_lock = threading.Lock()
+        
         logger.info(f"Data source initialized: primary={primary_source}, backup={backup_source}")
     
     def get_stock_data(
@@ -52,42 +52,60 @@ class SimulationDataSource:
         symbol: str,
         start_date: str,
         end_date: str,
-        freq: str = "d"
+        freq: str = "d",
+        use_cache: bool = True
     ) -> Optional[pd.DataFrame]:
         """
-        获取股票历史数据
+        获取股票历史数据（线程安全）
         
         Args:
             symbol: 股票代码（如 '000001' 或 'sh.000001'）
             start_date: 开始日期 'YYYY-MM-DD'
             end_date: 结束日期 'YYYY-MM-DD'
             freq: 频率 'd'=日线, 'w'=周线, 'm'=月线
+            use_cache: 是否使用缓存
             
         Returns:
             DataFrame with columns: date, open, high, low, close, volume
         """
-        try:
-            # 标准化股票代码
-            symbol = self._normalize_symbol(symbol)
-            
-            df = self.fetcher.get_stock_data(symbol, start_date, end_date, freq)
-            
-            if df is not None and not df.empty:
-                # 确保列名标准化
-                df = self._standardize_columns(df)
-                logger.debug(f"Fetched {len(df)} rows for {symbol}")
-                return df
-            else:
-                logger.warning(f"No data fetched for {symbol}")
-                return None
+        # 标准化股票代码
+        symbol = self._normalize_symbol(symbol)
+        
+        # 检查缓存
+        cache_key = f"{symbol}_{start_date}_{end_date}_{freq}"
+        if use_cache:
+            with self._cache_lock:
+                if cache_key in self._cache:
+                    logger.debug(f"Cache hit for {cache_key}")
+                    return self._cache[cache_key].copy()
+        
+        # 使用锁保护数据获取
+        with self._lock:
+            try:
+                df = self.fetcher.get_stock_data(symbol, start_date, end_date, freq)
                 
-        except Exception as e:
-            logger.error(f"Failed to fetch stock data for {symbol}: {e}")
-            return None
+                if df is not None and not df.empty:
+                    # 确保列名标准化
+                    df = self._standardize_columns(df)
+                    logger.debug(f"Fetched {len(df)} rows for {symbol}")
+                    
+                    # 缓存结果
+                    if use_cache:
+                        with self._cache_lock:
+                            self._cache[cache_key] = df.copy()
+                    
+                    return df
+                else:
+                    logger.warning(f"No data fetched for {symbol}")
+                    return None
+                    
+            except Exception as e:
+                logger.error(f"Failed to fetch stock data for {symbol}: {e}")
+                return None
     
     def get_realtime_quotes(self, symbols: List[str]) -> Optional[pd.DataFrame]:
         """
-        获取实时行情
+        获取实时行情（线程安全）
         
         Args:
             symbols: 股票代码列表
@@ -95,22 +113,24 @@ class SimulationDataSource:
         Returns:
             DataFrame with realtime quotes
         """
-        try:
-            # 标准化股票代码
-            symbols = [self._normalize_symbol(s) for s in symbols]
-            
-            df = self.fetcher.get_realtime_quotes(symbols)
-            
-            if df is not None and not df.empty:
-                logger.debug(f"Fetched realtime quotes for {len(symbols)} symbols")
-                return df
-            else:
-                logger.warning("No realtime quotes fetched")
-                return None
+        # 使用锁保护实时数据获取
+        with self._lock:
+            try:
+                # 标准化股票代码
+                symbols = [self._normalize_symbol(s) for s in symbols]
                 
-        except Exception as e:
-            logger.error(f"Failed to fetch realtime quotes: {e}")
-            return None
+                df = self.fetcher.get_realtime_quotes(symbols)
+                
+                if df is not None and not df.empty:
+                    logger.debug(f"Fetched realtime quotes for {len(symbols)} symbols")
+                    return df
+                else:
+                    logger.warning("No realtime quotes fetched")
+                    return None
+                    
+            except Exception as e:
+                logger.error(f"Failed to fetch realtime quotes: {e}")
+                return None
     
     def get_latest_price(self, symbol: str) -> Optional[float]:
         """
@@ -261,111 +281,185 @@ class SimulationDataSource:
 def create_data_source(config: dict) -> SimulationDataSource:
     """
     创建数据源实例
-
+    
     Args:
         config: 配置字典
-
+        
     Returns:
         数据源实例
     """
     primary = config.get("primary", "baostock")
     backup = config.get("backup", "akshare")
-
+    
     return SimulationDataSource(primary_source=primary, backup_source=backup)
 
+
+class MockDataSource:
+    """Mock数据源，用于测试（线程安全）"""
+    
+    def __init__(self, num_days: int = 100, initial_price: float = 100.0):
+        """
+        初始化Mock数据源
+        
+        Args:
+            num_days: 生成数据天数
+            initial_price: 初始价格
+        """
+        self.num_days = num_days
+        self.initial_price = initial_price
+        
+        # 添加线程锁
+        self._lock = threading.RLock()
+        
+        logger.info(f"MockDataSource initialized: {num_days} days, initial_price={initial_price}")
+    
+    def get_stock_data(
+        self,
+        symbol: str,
+        start_date: str,
+        end_date: str,
+        freq: str = "d"
+    ) -> Optional[pd.DataFrame]:
+        """
+        生成随机游走数据（线程安全）
+        
+        Args:
+            symbol: 股票代码
+            start_date: 开始日期
+            end_date: 结束日期
+            freq: 频率
+            
+        Returns:
+            DataFrame with columns: date, open, high, low, close, volume
+        """
+        import numpy as np
+        
+        # 使用锁保护数据生成
+        with self._lock:
+            try:
+                # 生成日期序列
+                start = pd.to_datetime(start_date)
+                end = pd.to_datetime(end_date)
+                dates = pd.date_range(start, end, freq='D')
+            
+                # 限制数量
+                if len(dates) > self.num_days:
+                    dates = dates[:self.num_days]
+                
+                # 生成随机游走价格
+                np.random.seed(42)  # 固定种子以便测试
+                returns = np.random.normal(0.001, 0.02, len(dates))  # 日均收益0.1%，波动2%
+                prices = self.initial_price * np.cumprod(1 + returns)
+                
+                # 生成OHLC数据
+                data = []
+                for i, (date, close) in enumerate(zip(dates, prices)):
+                    # 生成开高低收
+                    daily_volatility = close * 0.02  # 2%日内波动
+                    open_price = close * (1 + np.random.normal(0, 0.005))
+                    high = max(open_price, close) * (1 + abs(np.random.normal(0, 0.01)))
+                    low = min(open_price, close) * (1 - abs(np.random.normal(0, 0.01)))
+                    
+                    # 生成成交量
+                    volume = np.random.randint(1000000, 10000000)
+                    
+                    data.append({
+                        'date': date.strftime('%Y-%m-%d'),
+                        'open': round(open_price, 2),
+                        'high': round(high, 2),
+                        'low': round(low, 2),
+                        'close': round(close, 2),
+                        'volume': volume
+                    })
+            
+                df = pd.DataFrame(data)
+                logger.debug(f"Generated {len(df)} mock data rows for {symbol}")
+                return df
+                
+            except Exception as e:
+                logger.error(f"Failed to generate mock data: {e}")
+                return None
+    
+    def get_realtime_quotes(self, symbols: List[str]) -> Optional[pd.DataFrame]:
+        """获取实时行情（Mock）"""
+        import numpy as np
+        
+        data = []
+        for symbol in symbols:
+            price = self.initial_price * (1 + np.random.normal(0, 0.01))
+            data.append({
+                'symbol': symbol,
+                'current': round(price, 2),
+                'price': round(price, 2)
+            })
+        
+        return pd.DataFrame(data)
+    
+    def get_latest_price(self, symbol: str) -> Optional[float]:
+        """获取最新价格（Mock）"""
+        import numpy as np
+        return self.initial_price * (1 + np.random.normal(0, 0.01))
+
+
+def bar_to_tick(bar: pd.Series, num_ticks: int = 10) -> List[dict]:
+    """
+    将K线数据转换为Tick数据
+    
+    Args:
+        bar: K线数据（Series），包含 open, high, low, close, volume
+        num_ticks: 生成的tick数量
+        
+    Returns:
+        Tick数据列表，每个tick包含 price, volume, timestamp
+    """
+    import numpy as np
+    
+    try:
+        open_price = float(bar['open'])
+        high = float(bar['high'])
+        low = float(bar['low'])
+        close = float(bar['close'])
+        volume = int(bar['volume'])
+        
+        # 生成价格序列：open -> high/low -> close
+        prices = []
+        
+        # 开盘价
+        prices.append(open_price)
+        
+        # 中间价格在high和low之间随机游走
+        for i in range(num_ticks - 2):
+            # 随机在high和low之间
+            price = low + (high - low) * np.random.random()
+            prices.append(price)
+        
+        # 收盘价
+        prices.append(close)
+        
+        # 分配成交量
+        volumes = np.random.dirichlet(np.ones(num_ticks)) * volume
+        volumes = volumes.astype(int)
+        
+        # 生成时间戳（假设在一分钟内均匀分布）
+        base_time = datetime.datetime.now()
+        timestamps = [base_time + datetime.timedelta(seconds=i*6) for i in range(num_ticks)]
+        
+        # 组装tick数据
+        ticks = []
+        for price, vol, ts in zip(prices, volumes, timestamps):
+            ticks.append({
+                'price': round(price, 2),
+                'volume': int(vol),
+                'timestamp': ts.strftime('%Y-%m-%d %H:%M:%S')
+            })
+        
+        return ticks
+        
+    except Exception as e:
+        logger.error(f"Failed to convert bar to ticks: {e}")
+        return []
 
 # 别名，兼容旧代码
 DataSource = SimulationDataSource
 MultiSourceAdapter = SimulationDataSource
 
-
-class MockDataSource:
-    """Mock数据源，用于测试"""
-
-    def __init__(self, base_price: float = 10.0, volatility: float = 0.02):
-        self.base_price = base_price
-        self.volatility = volatility
-        self._price = base_price
-        import random
-        self.random = random
-
-    def get_stock_data(self, symbol: str, start_date: str, end_date: str, freq: str = "d") -> pd.DataFrame:
-        """生成Mock历史数据"""
-        import numpy as np
-
-        dates = pd.date_range(start=start_date, end=end_date, freq='B')
-        n = len(dates)
-
-        if n == 0:
-            return pd.DataFrame()
-
-        # 生成随机价格
-        returns = np.random.normal(0.0005, self.volatility, n)
-        prices = self.base_price * np.exp(np.cumsum(returns))
-
-        # 生成OHLCV
-        data = {
-            'date': dates,
-            'open': prices * (1 + np.random.uniform(-0.01, 0.01, n)),
-            'high': prices * (1 + np.random.uniform(0, 0.02, n)),
-            'low': prices * (1 - np.random.uniform(0, 0.02, n)),
-            'close': prices,
-            'volume': np.random.randint(100000, 1000000, n),
-        }
-
-        df = pd.DataFrame(data)
-        return df
-
-    def get_realtime_quotes(self, symbols: List[str]) -> pd.DataFrame:
-        """生成Mock实时行情"""
-        data = []
-        for symbol in symbols:
-            change = self.random.uniform(-0.05, 0.05)
-            price = self._price * (1 + change)
-            data.append({
-                'symbol': symbol,
-                'price': price,
-                'change_pct': change * 100,
-                'volume': self.random.randint(100000, 1000000),
-            })
-        return pd.DataFrame(data)
-
-    def get_latest_price(self, symbol: str) -> float:
-        """获取Mock最新价格"""
-        change = self.random.uniform(-0.02, 0.02)
-        self._price = self._price * (1 + change)
-        return self._price
-
-
-def bar_to_tick(bar: dict, symbol: str, timestamp: int = None) -> dict:
-    """
-    将K线数据转换为Tick数据
-
-    Args:
-        bar: K线数据字典，包含 open, high, low, close, volume
-        symbol: 股票代码
-        timestamp: 时间戳（毫秒），默认当前时间
-
-    Returns:
-        Tick数据字典
-    """
-    import time
-
-    if timestamp is None:
-        timestamp = int(time.time() * 1000)
-
-    return {
-        'symbol': symbol,
-        'timestamp': timestamp,
-        'last_price': bar.get('close', 0.0),
-        'open': bar.get('open', 0.0),
-        'high': bar.get('high', 0.0),
-        'low': bar.get('low', 0.0),
-        'close': bar.get('close', 0.0),
-        'volume': bar.get('volume', 0),
-        'amount': bar.get('amount', 0.0),
-        'bid_price': bar.get('close', 0.0) * 0.999,
-        'ask_price': bar.get('close', 0.0) * 1.001,
-        'bid_volume': 10000,
-        'ask_volume': 10000,
-    }

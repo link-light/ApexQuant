@@ -1,0 +1,47 @@
+account:
+  account_id: simulation_001
+  commission_rate: 0.00025
+  initial_capital: 100000.0
+  slippage_rate: 0.0001
+  stamp_tax_rate: 0.001
+ai_advisor:
+  api_key: ''
+  base_url: https://api.deepseek.com
+  enabled: true
+  max_calls_per_day: 100
+  max_tokens: 2000
+  model: deepseek-chat
+  temperature: 0.7
+backtest:
+  bar_interval: 1m
+  end_date: '2024-12-31'
+  start_date: '2023-01-01'
+data_source:
+  backup: akshare
+  primary: baostock
+  proxy: null
+database:
+  auto_backup: true
+  backup_interval: 3600
+  path: data/simulation.db
+logging:
+  backup_count: 5
+  file: logs/simulation.log
+  level: INFO
+  max_size: 10MB
+realtime:
+  auto_trade: false
+  update_interval: 60
+risk_control:
+  daily_loss_limit_pct: 0.05
+  enable_risk_control: true
+  max_single_order_amount: 50000.0
+  max_single_position_pct: 0.3
+  max_total_position_pct: 0.95
+  stop_loss_pct: 0.1
+  take_profit_pct: 0.2
+trading_hours:
+  afternoon_end: '15:00'
+  afternoon_start: '13:00'
+  morning_end: '11:30'
+  morning_start: 09:30

@@ -43,7 +43,7 @@ prophet>=1.1.5  # Facebook Prophet
 # ==================== 工具库 ====================
 requests>=2.31.0
 websocket-client>=1.7.0
-python-dotenv>=1.0.0  # 环境变量管理
+python-dotenv>=1.0.0  # 环境变量管理（安全的API密钥管理）
 pyyaml>=6.0.1
 loguru>=0.7.2  # 日志库
 tqdm>=4.66.0  # 进度条
