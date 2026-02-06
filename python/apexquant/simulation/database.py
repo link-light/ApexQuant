@@ -34,13 +34,13 @@ class DatabaseManager(DatabaseBackupMixin):
         """
         self.db_path = Path(db_path)
         self.conn: Optional[sqlite3.Connection] = None
-        
+
+        # 确保数据库目录存在（必须先创建）
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+
         # 备份目录
         self.backup_dir = self.db_path.parent / 'backups'
-        self.backup_dir.mkdir(exist_ok=True)
-        
-        # 确保数据库目录存在
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.backup_dir.mkdir(parents=True, exist_ok=True)
         
         # 初始化数据库
         self.init_database()
@@ -292,6 +292,120 @@ class DatabaseManager(DatabaseBackupMixin):
         finally:
             conn.close()
     
+    def save_order(
+        self,
+        account_id: str,
+        order_id: str,
+        symbol: str,
+        side: str,
+        order_type: str,
+        price: float,
+        volume: int,
+        status: str = "pending"
+    ) -> bool:
+        """
+        保存订单记录
+
+        Args:
+            account_id: 账户ID
+            order_id: 订单ID
+            symbol: 股票代码
+            side: 买卖方向 (buy/sell)
+            order_type: 订单类型 (market/limit)
+            price: 价格
+            volume: 数量
+            status: 订单状态
+
+        Returns:
+            是否成功
+        """
+        try:
+            current_time = int(time.time())
+            direction = side.upper() if side else "BUY"
+            otype = order_type.upper() if order_type else "LIMIT"
+
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO orders
+                    (order_id, account_id, symbol, direction, order_type, price, volume, status, submit_time)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (order_id, account_id, symbol, direction, otype, price, volume, status.upper(), current_time))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Failed to save order: {e}")
+            return False
+
+    def save_equity_curve(
+        self,
+        account_id: str,
+        date,
+        total_assets: float,
+        cash: float = 0.0,
+        market_value: float = 0.0
+    ) -> bool:
+        """
+        保存权益曲线数据点
+
+        Args:
+            account_id: 账户ID
+            date: 日期 (datetime.date 或 str)
+            total_assets: 总资产
+            cash: 现金
+            market_value: 持仓市值
+
+        Returns:
+            是否成功
+        """
+        try:
+            # 转换日期为时间戳
+            if hasattr(date, 'strftime'):
+                timestamp = int(datetime.combine(date, datetime.min.time()).timestamp())
+            else:
+                timestamp = int(datetime.strptime(str(date), "%Y-%m-%d").timestamp())
+
+            # 计算PnL
+            total_pnl = total_assets - 100000.0  # 假设初始资金10万
+            total_pnl_pct = (total_pnl / 100000.0) * 100 if total_pnl != 0 else 0.0
+
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO equity_curve
+                    (account_id, timestamp, total_assets, cash, market_value, total_pnl, total_pnl_pct)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (account_id, timestamp, total_assets, cash, market_value, total_pnl, total_pnl_pct))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Failed to save equity curve: {e}")
+            return False
+
+    def get_equity_curve(self, account_id: str) -> List[Dict]:
+        """
+        获取权益曲线数据
+
+        Args:
+            account_id: 账户ID
+
+        Returns:
+            权益曲线数据列表
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT * FROM equity_curve
+                    WHERE account_id = ?
+                    ORDER BY timestamp ASC
+                """, (account_id,))
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Failed to get equity curve: {e}")
+            return []
+
     def close(self):
         """关闭数据库连接"""
         if self.conn:

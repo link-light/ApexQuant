@@ -178,10 +178,13 @@ class SimulationController:
                 
                 # 更新持仓市值（使用收盘价）
                 self._update_positions_value(daily_data)
-                
+
                 # T+1处理
-                date_timestamp = int(trade_date.strftime("%Y%m%d"))
-                self.exchange.update_daily(date_timestamp)
+                if self.use_cpp and CPP_AVAILABLE:
+                    date_timestamp = int(trade_date.strftime("%Y%m%d"))
+                    self.exchange.update_daily(date_timestamp)
+                else:
+                    self.exchange.update_daily()
                 
                 # 记录权益曲线
                 self._record_equity(trade_date)
@@ -275,14 +278,14 @@ class SimulationController:
     ) -> Optional[str]:
         """
         提交订单
-        
+
         Args:
             symbol: 股票代码
             side: 买卖方向 'buy' or 'sell'
             order_type: 订单类型 'market' or 'limit'
             volume: 数量
             price: 价格（限价单使用）
-            
+
         Returns:
             订单ID，失败返回None
         """
@@ -292,7 +295,7 @@ class SimulationController:
             available_cash = self.exchange.get_available_cash()
             total_assets = self.exchange.get_total_assets()
             current_positions = self._get_current_positions_dict()
-            
+
             risk_check = self.risk_manager.check_order(
                 symbol=symbol,
                 side=side,
@@ -303,46 +306,62 @@ class SimulationController:
                 total_assets=total_assets,
                 current_positions=current_positions
             )
-            
+
             if risk_check.is_reject():
                 logger.warning(f"Order rejected by risk control: {risk_check.reason}")
                 return None
-            
-            # 创建C++订单对象
-            cpp_side = sim_cpp.OrderSide.BUY if side.lower() == 'buy' else sim_cpp.OrderSide.SELL
-            cpp_type = sim_cpp.OrderType.MARKET if order_type.lower() == 'market' else sim_cpp.OrderType.LIMIT
-            
+
             order_id = f"ORD_{datetime.datetime.now().strftime('%Y%m%d%H%M%S%f')}"
             submit_time = int(datetime.datetime.now().timestamp() * 1000)
-            
-            order = sim_cpp.SimulatedOrder(
-                order_id,
-                symbol,
-                cpp_side,
-                cpp_type,
-                price,
-                volume,
-                submit_time
-            )
-            
-            # 提交到C++交易所
+
+            if self.use_cpp and CPP_AVAILABLE and sim_cpp is not None:
+                # 使用C++订单对象
+                cpp_side = sim_cpp.OrderSide.BUY if side.lower() == 'buy' else sim_cpp.OrderSide.SELL
+                cpp_type = sim_cpp.OrderType.MARKET if order_type.lower() == 'market' else sim_cpp.OrderType.LIMIT
+
+                order = sim_cpp.SimulatedOrder(
+                    order_id,
+                    symbol,
+                    cpp_side,
+                    cpp_type,
+                    price,
+                    volume,
+                    submit_time
+                )
+            else:
+                # 使用Python Mock订单对象
+                from .mock_exchange import OrderSide as MockOrderSide, OrderType as MockOrderType
+
+                class MockOrder:
+                    def __init__(self):
+                        self.order_id = order_id
+                        self.symbol = symbol
+                        self.side = MockOrderSide.BUY if side.lower() == 'buy' else MockOrderSide.SELL
+                        self.order_type = MockOrderType.MARKET if order_type.lower() == 'market' else MockOrderType.LIMIT
+                        self.price = price
+                        self.volume = volume
+                        self.submit_time = submit_time
+
+                order = MockOrder()
+
+            # 提交到交易所
             result_order_id = self.exchange.submit_order(order)
-            
+
             if result_order_id:
                 logger.info(f"Order submitted: {result_order_id}, {symbol} {side} {volume}@{price:.2f}")
-                
+
                 # 记录到数据库
-                self._save_order_to_db(order)
-                
+                self._save_order_to_db_generic(order_id, symbol, side, order_type, price, volume)
+
                 # 回调
                 if self.on_order_callback:
                     self.on_order_callback(order)
-                
+
                 return result_order_id
             else:
                 logger.warning(f"Order submission failed")
                 return None
-                
+
         except Exception as e:
             logger.error(f"Failed to submit order: {e}")
             return None
@@ -392,29 +411,60 @@ class SimulationController:
     def get_positions(self) -> List[dict]:
         """
         获取持仓列表
-        
+
         Returns:
             持仓列表
         """
         try:
-            cpp_positions = self.exchange.get_all_positions()
-            
-            positions = []
-            for pos in cpp_positions:
-                positions.append({
-                    "symbol": pos.symbol,
-                    "volume": pos.volume,
-                    "available_volume": pos.available_volume,
-                    "frozen_volume": pos.frozen_volume,
-                    "avg_cost": pos.avg_cost,
-                    "current_price": pos.current_price,
-                    "market_value": pos.market_value,
-                    "unrealized_pnl": pos.unrealized_pnl,
-                    "buy_date": pos.buy_date,
-                })
-            
-            return positions
-            
+            raw_positions = self.exchange.get_all_positions()
+
+            if self.use_cpp and CPP_AVAILABLE and sim_cpp is not None:
+                # C++返回的是对象列表
+                positions = []
+                for pos in raw_positions:
+                    positions.append({
+                        "symbol": pos.symbol,
+                        "volume": pos.volume,
+                        "available_volume": pos.available_volume,
+                        "frozen_volume": getattr(pos, 'frozen_volume', 0),
+                        "avg_cost": pos.avg_cost,
+                        "current_price": getattr(pos, 'current_price', pos.avg_cost),
+                        "market_value": pos.market_value,
+                        "unrealized_pnl": pos.unrealized_pnl,
+                        "buy_date": getattr(pos, 'buy_date', ''),
+                    })
+                return positions
+            else:
+                # MockExchange返回的已经是字典列表
+                positions = []
+                for pos in raw_positions:
+                    if isinstance(pos, dict):
+                        positions.append({
+                            "symbol": pos.get('symbol', ''),
+                            "volume": pos.get('volume', 0),
+                            "available_volume": pos.get('available_volume', 0),
+                            "frozen_volume": pos.get('frozen_volume', 0),
+                            "avg_cost": pos.get('avg_cost', 0.0),
+                            "current_price": pos.get('current_price', pos.get('avg_cost', 0.0)),
+                            "market_value": pos.get('market_value', 0.0),
+                            "unrealized_pnl": pos.get('unrealized_pnl', 0.0),
+                            "buy_date": pos.get('buy_date', ''),
+                        })
+                    else:
+                        # 对象形式
+                        positions.append({
+                            "symbol": pos.symbol,
+                            "volume": pos.volume,
+                            "available_volume": pos.available_volume,
+                            "frozen_volume": getattr(pos, 'frozen_volume', 0),
+                            "avg_cost": pos.avg_cost,
+                            "current_price": getattr(pos, 'current_price', pos.avg_cost),
+                            "market_value": pos.market_value,
+                            "unrealized_pnl": pos.unrealized_pnl,
+                            "buy_date": getattr(pos, 'buy_date', ''),
+                        })
+                return positions
+
         except Exception as e:
             logger.error(f"Failed to get positions: {e}")
             return []
@@ -422,25 +472,36 @@ class SimulationController:
     def get_pending_orders(self, symbol: Optional[str] = None) -> List[dict]:
         """
         获取待成交订单
-        
+
         Args:
             symbol: 股票代码（可选）
-            
+
         Returns:
             订单列表
         """
         try:
-            if symbol:
-                cpp_orders = self.exchange.get_pending_orders(symbol)
+            raw_orders = self.exchange.get_pending_orders()
+
+            if self.use_cpp and CPP_AVAILABLE and sim_cpp is not None:
+                orders = []
+                for order in raw_orders:
+                    order_dict = self._cpp_order_to_dict(order)
+                    if symbol is None or order_dict.get('symbol') == symbol:
+                        orders.append(order_dict)
+                return orders
             else:
-                cpp_orders = self.exchange.get_pending_orders()
-            
-            orders = []
-            for order in cpp_orders:
-                orders.append(self._cpp_order_to_dict(order))
-            
-            return orders
-            
+                # MockExchange返回字典列表
+                orders = []
+                for order in raw_orders:
+                    if isinstance(order, dict):
+                        if symbol is None or order.get('symbol') == symbol:
+                            orders.append(order)
+                    else:
+                        order_dict = self._mock_order_to_dict(order)
+                        if symbol is None or order_dict.get('symbol') == symbol:
+                            orders.append(order_dict)
+                return orders
+
         except Exception as e:
             logger.error(f"Failed to get pending orders: {e}")
             return []
@@ -448,29 +509,33 @@ class SimulationController:
     def get_trade_history(self) -> List[dict]:
         """
         获取成交历史
-        
+
         Returns:
             成交记录列表
         """
         try:
-            cpp_trades = self.exchange.get_trade_history()
-            
-            trades = []
-            for trade in cpp_trades:
-                trades.append({
-                    "trade_id": trade.trade_id,
-                    "order_id": trade.order_id,
-                    "symbol": trade.symbol,
-                    "side": "buy" if trade.side == sim_cpp.OrderSide.BUY else "sell",
-                    "price": trade.price,
-                    "volume": trade.volume,
-                    "commission": trade.commission,
-                    "timestamp": trade.timestamp,
-                    "realized_pnl": trade.realized_pnl,
-                })
-            
-            return trades
-            
+            if self.use_cpp and CPP_AVAILABLE and sim_cpp is not None:
+                cpp_trades = self.exchange.get_trade_history()
+
+                trades = []
+                for trade in cpp_trades:
+                    trades.append({
+                        "trade_id": trade.trade_id,
+                        "order_id": trade.order_id,
+                        "symbol": trade.symbol,
+                        "side": "buy" if trade.side == sim_cpp.OrderSide.BUY else "sell",
+                        "price": trade.price,
+                        "volume": trade.volume,
+                        "commission": trade.commission,
+                        "timestamp": trade.timestamp,
+                        "realized_pnl": getattr(trade, 'realized_pnl', 0.0),
+                    })
+                return trades
+            else:
+                # MockExchange返回字典列表
+                raw_trades = self.exchange.get_trades()
+                return raw_trades if raw_trades else []
+
         except Exception as e:
             logger.error(f"Failed to get trade history: {e}")
             return []
@@ -551,6 +616,10 @@ class SimulationController:
         """获取持仓数量"""
         try:
             pos = self.exchange.get_position(symbol)
+            if pos is None:
+                return 0
+            if isinstance(pos, dict):
+                return pos.get('volume', 0)
             return pos.volume
         except:
             return 0
@@ -574,7 +643,7 @@ class SimulationController:
         }
     
     def _save_order_to_db(self, order: Any) -> None:
-        """保存订单到数据库"""
+        """保存订单到数据库（C++订单）"""
         try:
             self.database.save_order(
                 account_id=self.account_id,
@@ -588,6 +657,37 @@ class SimulationController:
             )
         except Exception as e:
             logger.error(f"Failed to save order to db: {e}")
+
+    def _save_order_to_db_generic(self, order_id: str, symbol: str, side: str,
+                                   order_type: str, price: float, volume: int) -> None:
+        """保存订单到数据库（通用方法）"""
+        try:
+            self.database.save_order(
+                account_id=self.account_id,
+                order_id=order_id,
+                symbol=symbol,
+                side=side,
+                order_type=order_type,
+                price=price,
+                volume=volume,
+                status="pending"
+            )
+        except Exception as e:
+            logger.error(f"Failed to save order to db: {e}")
+
+    def _mock_order_to_dict(self, order: Any) -> dict:
+        """将Mock订单转为字典"""
+        return {
+            "order_id": order.order_id,
+            "symbol": order.symbol,
+            "side": order.side.value.lower() if hasattr(order.side, 'value') else str(order.side),
+            "type": order.order_type.value.lower() if hasattr(order.order_type, 'value') else str(order.order_type),
+            "price": order.price,
+            "volume": order.volume,
+            "filled_volume": getattr(order, 'filled_volume', 0),
+            "status": getattr(order, 'status', 'pending'),
+            "submit_time": getattr(order, 'submit_time', 0),
+        }
     
     def _cpp_order_to_dict(self, order: Any) -> dict:
         """将C++订单转为字典"""
@@ -622,11 +722,20 @@ class SimulationController:
         """生成绩效报告"""
         try:
             # 从数据库获取权益曲线
-            equity_curve = self.database.get_equity_curve(self.account_id)
-            
+            equity_curve_data = self.database.get_equity_curve(self.account_id)
+
+            # 转换为DataFrame
+            if equity_curve_data:
+                equity_curve = pd.DataFrame(equity_curve_data)
+                # 重命名列以匹配分析器的期望
+                if 'total_assets' in equity_curve.columns:
+                    equity_curve['equity'] = equity_curve['total_assets']
+            else:
+                equity_curve = pd.DataFrame()
+
             # 获取交易记录
             trades = self.get_trade_history()
-            
+
             # 分析绩效
             metrics = self.performance_analyzer.analyze(equity_curve, trades)
             
