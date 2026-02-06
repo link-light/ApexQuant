@@ -175,7 +175,7 @@ def run_backtest(strategy, start_date, end_date, symbols, initial_capital,
             )
             
             # 获取性能分析
-            analyzer = PerformanceAnalyzer(controller.db, controller.account_id)
+            analyzer = PerformanceAnalyzer(controller.database, controller.account_id)
             metrics = analyzer.calculate_performance_metrics()
             
             # 保存结果到session state
