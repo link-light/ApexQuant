@@ -10,6 +10,21 @@ from .multi_source import (
     get_stock_data,
     get_realtime_price
 )
+from .market_sentiment import (
+    MarketSentimentAnalyzer,
+    SentimentIndicator,
+    SentimentLevel,
+    VolumeAnomaly,
+    get_market_sentiment,
+    detect_volume_anomalies
+)
+from .macro_data import (
+    MacroDataFetcher,
+    MacroIndicator,
+    MacroIndicatorType,
+    MacroDataset,
+    get_macro_indicators
+)
 
 # 推荐使用多数据源
 __all__ = [
@@ -17,6 +32,17 @@ __all__ = [
     'get_stock_data',
     'get_realtime_price',
     'AKShareDataFetcher',
-    'DataManager'
+    'DataManager',
+    'MarketSentimentAnalyzer',
+    'SentimentIndicator',
+    'SentimentLevel',
+    'VolumeAnomaly',
+    'get_market_sentiment',
+    'detect_volume_anomalies',
+    'MacroDataFetcher',
+    'MacroIndicator',
+    'MacroIndicatorType',
+    'MacroDataset',
+    'get_macro_indicators'
 ]
 
